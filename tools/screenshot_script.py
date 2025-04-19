@@ -4,6 +4,10 @@ import argparse
 from pathlib import Path
 import cv2
 import logging
+import concurrent.futures
+import time
+import urllib.parse
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -46,160 +50,283 @@ def format_timestamp(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}.{millis:02d}"
 
 
-def extract_random_frames(
-    url: str,
-    num_frames: int = 10,
-    output_dir: Path = Path("screenshots"),
-    yt_dlp_path: Path = Path("tools/third_party/yt-dlp.exe"),
-) -> None:
-    """Extracts random frames from a video URL using yt-dlp and OpenCV.
+def parse_url_and_time(url_str: str) -> tuple[str | None, float | None]:
+    """Parses a URL to extract the base URL and time in seconds from '?t=...'."""
+    try:
+        parsed_url = urllib.parse.urlparse(url_str)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        # Handle 't=' or potentially 'start='
+        time_str = query_params.get("t", query_params.get("start", [None]))[0]
 
-    Downloads small segments around random timestamps using yt-dlp
-    and then extracts a single frame from the middle of each segment using OpenCV.
+        # Remove query and fragment for the base URL
+        base_url = urllib.parse.urlunparse(parsed_url._replace(query="", fragment=""))
 
-    Args:
-        url: The URL of the video.
-        num_frames: The number of random frames to extract.
-        output_dir: The directory to save the extracted frames.
-        yt_dlp_path: Path to the yt-dlp executable.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
+        if time_str:
+            # Handle potential suffixes like 's' (though youtube uses integers)
+            time_sec = float(
+                re.sub(r"[^\d.]", "", time_str)
+            )  # Strip non-numeric chars except '.'
+            return base_url, time_sec
+        else:
+            return url_str, None  # Return original URL if no time
+    except Exception as e:
+        logger.warning(f"Could not parse URL or time from '{url_str}': {e}")
+        return None, None
+
+
+def _extract_frame_at_time(
+    task_num: int,
+    total_tasks: int,
+    original_url: str,
+    base_url: str,
+    time_sec: float,
+    output_dir: Path,
+    temp_dir: Path,
+    yt_dlp_path: Path,
+):
+    """Downloads a segment around a specific time and extracts the first frame."""
+    timestamp_str_file = (
+        format_timestamp(time_sec).replace(":", "").replace(".", "-")
+    )  # For filename e.g., 0534-00
+    timestamp_str_log = format_timestamp(time_sec)  # For logging MM:SS.ms
+    log_prefix = f"[{task_num}/{total_tasks} @{timestamp_str_log}]"
+    logger.info(f"{log_prefix} Processing URL: {original_url}")
+
+    # Calculate a small segment starting exactly at the desired timestamp
+    segment_start = time_sec
+    segment_end = (
+        time_sec + 1.5
+    )  # Download 1.5 second segment to increase chance of getting the frame
+
+    segment_start_fmt = format_timestamp(segment_start)
+    segment_end_fmt = format_timestamp(segment_end)
+
+    # Attempt to create a more descriptive filename part from URL
+    try:
+        url_path_part = urllib.parse.urlparse(original_url).path.strip("/")
+        url_safe_part = re.sub(
+            r'[\\/:*?"<>|\s]+', "_", url_path_part
+        )  # Basic sanitization
+        if not url_safe_part:  # Handle cases like root path only
+            url_safe_part = re.sub(
+                r'[\\/:*?"<>|\s]+', "_", urllib.parse.urlparse(original_url).netloc
+            )
+        max_len = 50  # Limit length
+        url_safe_part = (
+            url_safe_part[-max_len:] if len(url_safe_part) > max_len else url_safe_part
+        )
+    except Exception:
+        url_safe_part = f"url_{task_num}"  # Fallback
+
+    output_filename = f"{url_safe_part}_{timestamp_str_file}.jpg"
+    output_path = output_dir / output_filename
+    temp_video_output_template = (
+        temp_dir / f"segment_{task_num}_{timestamp_str_file}.%(ext)s"
+    )
+    temp_video_path = None  # Initialize
 
     try:
-        duration = get_video_duration(url, yt_dlp_path)
-        logger.info(f"Video duration: {int(duration // 60)}m {int(duration % 60)}s")
-    except RuntimeError as e:
-        logger.error(f"Error: {e}")
-        return
-
-    if duration < 1:
-        logger.error("Video duration is too short.")
-        return
-
-    # Generate random timestamps (ensure they are at least 0.5s from start/end)
-    # Use max(1, int(duration)-1) to handle very short videos safely
-    valid_duration_range = max(1.0, duration - 1.0)
-    num_possible_frames = int(valid_duration_range)
-
-    if num_possible_frames == 0:
-        logger.error("Not enough duration range to pick frames safely.")
-        return
-
-    actual_num_frames = min(num_frames, num_possible_frames)
-    if actual_num_frames < num_frames:
-        logger.warning(
-            f"Warning: Video duration only allows extracting {actual_num_frames} frames."
-        )
-
-    random_times = sorted(
-        random.sample(
-            [
-                t / 10 for t in range(5, int(duration * 10) - 5)
-            ],  # Sample time points with 0.1s precision, avoiding edges
-            actual_num_frames,
-        )
-    )
-
-    temp_dir = Path(".cache/screenshots")
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    for i, time_sec in enumerate(random_times):
-        frame_num = i + 1
-        minutes = int(time_sec // 60)
-        seconds = int(time_sec % 60)
-        timestamp_str = f"{minutes:02d}m{seconds:02d}s"
-        logger.info(
-            f"\nProcessing frame {frame_num}/{actual_num_frames} at ~{timestamp_str}..."
-        )
-
-        # Calculate a small segment around the desired timestamp (e.g., 2 seconds for robustness)
-        segment_start = max(0, time_sec)
-        segment_end = min(duration, time_sec + 1)
-
-        segment_start_fmt = format_timestamp(segment_start)
-        segment_end_fmt = format_timestamp(segment_end)
-
-        # Temporary video segment path
-        # Use a more robust naming scheme in case yt-dlp adds extra info
-        temp_video_output_template = temp_dir / f"segment_{frame_num}.%(ext)s"
-
         # Download just a small segment
         download_command = [
             str(yt_dlp_path),
-            url,
-            # "--quiet",
+            base_url,  # Use base_url for download
+            # "--quiet", # Keep output for debugging potential download issues
             "--no-warnings",
-            # "--force-keyframes-at-cuts", # Can help with accuracy but might slow down
+            # "--force-keyframes-at-cuts", # Might help but can be slower
             "--download-sections",
             f"*{segment_start_fmt}-{segment_end_fmt}",
             "-o",
             str(temp_video_output_template),
-            # Request best video quality/resolution, prefer mp4/webm container
             "-f",
-            "bestvideo[ext=mp4]/bestvideo[ext=webm]/bestvideo/best",
+            "bestvideo[ext=mp4]/bestvideo[ext=webm]/bestvideo/best",  # Prefer common formats
+            # Add headers to potentially mimic browser request
+            "--add-header",
+            "User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36",
+            "--add-header",
+            "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "--add-header",
+            "Accept-Language:en-US,en;q=0.9",
         ]
 
-        logger.info(f"Downloading segment: {segment_start_fmt} - {segment_end_fmt}")
-        try:
-            subprocess.run(download_command, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
+        logger.info(
+            f"{log_prefix} Downloading segment: {segment_start_fmt} - {segment_end_fmt}"
+        )
+        result = subprocess.run(
+            download_command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",  # Handle potential decoding errors in output
+        )
+        logger.debug(f"{log_prefix} yt-dlp stdout: {result.stdout}")
+        logger.debug(f"{log_prefix} yt-dlp stderr: {result.stderr}")
+
+        # Find the downloaded segment file more reliably
+        potential_files = list(
+            temp_dir.glob(f"segment_{task_num}_{timestamp_str_file}.*")
+        )
+        if not potential_files:
             logger.error(
-                f"Failed to download segment for timestamp {timestamp_str}. Error: {e.stderr.decode()}"
+                f"{log_prefix} Downloaded segment file not found for {timestamp_str_log}."
+                f"\nCheck yt-dlp output:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
             )
-            continue
-
-        logger.info(f"Downloaded segment in {time.time() - since:.2f} seconds")
-
-        # Find the downloaded segment file (yt-dlp might choose extension)
-        downloaded_files = list(temp_dir.glob(f"segment_{frame_num}.*"))
-        if not downloaded_files:
+            return
+        temp_video_path = potential_files[0]
+        if temp_video_path.stat().st_size == 0:
             logger.error(
-                f"Could not find downloaded segment file for timestamp {timestamp_str}, skipping..."
+                f"{log_prefix} Downloaded segment file {temp_video_path} is empty for {timestamp_str_log}."
             )
-            continue
-        temp_video_path = downloaded_files[0]
+            temp_video_path.unlink(missing_ok=True)  # Clean up empty file
+            return
 
-        # Output image path
-        output_path = output_dir / f"frame_{frame_num:02d}_{timestamp_str}.jpg"
-
-        # Use OpenCV to extract the frame closest to the target time
-        logger.info(f"Extracting frame using OpenCV to {output_path}...")
+        # Use OpenCV to extract the frame
+        logger.info(f"{log_prefix} Extracting frame using OpenCV to {output_path}...")
         cap = cv2.VideoCapture(str(temp_video_path))
         if not cap.isOpened():
             logger.error(
-                f"Error: OpenCV could not open video segment: {temp_video_path}"
+                f"{log_prefix} Error: OpenCV could not open video segment: {temp_video_path}"
             )
-            continue
+            return
 
+        # Read the first available frame
         ret, frame = cap.read()
-        # If reading the exact frame fails, try the next one (seeking isn't always precise)
-        if not ret:
-            logger.warning(f"Warning: Could not read frame {0}. Trying next frame.")
-            ret, frame = cap.read()
-
-        cap.release()  # Release the video capture object
+        cap.release()  # Release early
 
         if ret and frame is not None:
-            # Save the frame with high JPEG quality
             cv2.imwrite(str(output_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-            logger.info(f"Successfully saved frame {frame_num} to {output_path}")
+            logger.info(f"{log_prefix} Successfully saved frame to {output_path}")
         else:
             logger.error(
-                f"Error: Failed to read frame from video segment {temp_video_path}"
+                f"{log_prefix} Error: Failed to read frame from video segment {temp_video_path}"
             )
+
+    except subprocess.CalledProcessError as e:
+        logger.error(
+            f"{log_prefix} Failed to download segment for {timestamp_str_log}. URL: {base_url}"
+            f"\nError: {e.stderr}"
+        )
+    except Exception as e:  # Catch other potential errors (OpenCV, filesystem, etc.)
+        logger.error(
+            f"{log_prefix} An unexpected error occurred processing {original_url} at {timestamp_str_log}: {e}",
+            exc_info=True,  # Log traceback for unexpected errors
+        )
+    finally:
+        # Clean up the temporary video segment
+        if temp_video_path and temp_video_path.exists():
+            try:
+                temp_video_path.unlink()
+                logger.debug(f"{log_prefix} Deleted temp file: {temp_video_path}")
+            except OSError as e:
+                logger.warning(
+                    f"{log_prefix} Could not delete temp file {temp_video_path}: {e}"
+                )
+
+
+def process_urls_from_file(
+    url_file: Path,
+    output_dir: Path = Path("screenshots"),
+    yt_dlp_path: Path = Path("tools/third_party/yt-dlp.exe"),
+    max_workers: int = 4,
+) -> None:
+    """
+    Reads URLs with timestamps from a file, downloads segments,
+    and extracts the specified frame for each URL in parallel.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    urls_to_process = []
+    try:
+        with open(url_file, "r", encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                url_str = line.strip()
+                if not url_str or url_str.startswith("#"):  # Skip empty lines/comments
+                    continue
+                base_url, time_sec = parse_url_and_time(url_str)
+                if base_url and time_sec is not None:
+                    urls_to_process.append(
+                        {
+                            "original_url": url_str,
+                            "base_url": base_url,
+                            "time_sec": time_sec,
+                        }
+                    )
+                else:
+                    logger.warning(
+                        f"Skipping line {i + 1}: Invalid URL or missing timestamp: {url_str}"
+                    )
+    except FileNotFoundError:
+        logger.error(f"Error: URL file not found at {url_file}")
+        return
+    except Exception as e:
+        logger.error(f"Error reading URL file {url_file}: {e}")
+        return
+
+    if not urls_to_process:
+        logger.error("No valid URLs with timestamps found in the file.")
+        return
+
+    temp_dir = Path(".cache/screenshots_specific")  # Use a different cache dir
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Using temporary directory: {temp_dir}")
+
+    total_tasks = len(urls_to_process)
+    logger.info(
+        f"Found {total_tasks} URLs with timestamps. Starting parallel extraction with {max_workers} workers..."
+    )
+
+    futures = []
+    start_time = time.monotonic()
+    # Use ThreadPoolExecutor for I/O-bound tasks (downloading)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for i, task_data in enumerate(urls_to_process):
+            future = executor.submit(
+                _extract_frame_at_time,
+                task_num=i + 1,
+                total_tasks=total_tasks,
+                original_url=task_data["original_url"],
+                base_url=task_data["base_url"],
+                time_sec=task_data["time_sec"],
+                output_dir=output_dir,
+                temp_dir=temp_dir,
+                yt_dlp_path=yt_dlp_path,
+            )
+            futures.append(future)
+
+        # Wait for all futures to complete and log any exceptions
+        completed_tasks = 0
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()  # Raise exception if task failed
+                completed_tasks += 1
+            except Exception as e:
+                # Error already logged inside _extract_frame_at_time
+                pass  # logger.error(f"A task failed: {e}", exc_info=True) # Redundant?
+
+    end_time = time.monotonic()
+    logger.info(f"Parallel extraction finished in {end_time - start_time:.2f} seconds.")
+    logger.info(f"Successfully processed {completed_tasks}/{total_tasks} URLs.")
+
+    # Optional: Clean up the temp directory
+    # Consider keeping it for debugging if many errors occur
+    # import shutil
+    # try:
+    #     shutil.rmtree(temp_dir)
+    #     logger.info(f"Cleaned up temporary directory: {temp_dir}")
+    # except OSError as e:
+    #     logger.warning(f"Could not clean up temporary directory {temp_dir}: {e}")
 
 
 def main():
-    """Parses command-line arguments and initiates frame extraction."""
+    """Parses command-line arguments and initiates frame extraction from a URL file."""
     parser = argparse.ArgumentParser(
-        description="Extract random frames from a video URL."
+        description="Extract specific frames from a list of video URLs in a file."
     )
-    parser.add_argument("--url", help="The URL of the video (e.g., YouTube link).")
     parser.add_argument(
-        "-n",
-        "--num-frames",
-        type=int,
-        default=10,
-        help="Number of random frames to extract (default: 10).",
+        "--url-file",
+        type=Path,
+        required=True,  # Make it required
+        help="Path to a text file containing video URLs (one per line, optionally with '?t=...' or '&start=...' timestamp).",
     )
     parser.add_argument(
         "-o",
@@ -214,22 +341,31 @@ def main():
         default=Path("tools/third_party/yt-dlp.exe"),
         help="Path to the yt-dlp executable.",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=4,  # Default to 4 parallel workers
+        help="Maximum number of parallel workers (threads) for downloading/processing.",
+    )
 
     args = parser.parse_args()
 
     if not args.yt_dlp_path.is_file():
         logger.error(f"Error: yt-dlp executable not found at {args.yt_dlp_path}")
         return
+    if not args.url_file.is_file():  # Check if url file exists
+        logger.error(f"Error: URL file not found at {args.url_file}")
+        return
 
-    logger.info(f"Starting frame extraction for: {args.url}")
-    logger.info(f"Number of frames: {args.num_frames}")
+    logger.info(f"Starting frame extraction from URL file: {args.url_file}")
     logger.info(f"Output directory: {args.output_dir}")
+    logger.info(f"Max workers: {args.max_workers}")
 
-    extract_random_frames(
-        url=args.url,
-        num_frames=args.num_frames,
+    process_urls_from_file(  # Call the refactored function
+        url_file=args.url_file,
         output_dir=args.output_dir,
         yt_dlp_path=args.yt_dlp_path,
+        max_workers=args.max_workers,
     )
     logger.info("\nExtraction process finished.")
 
