@@ -172,3 +172,12 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Temporary video files downloaded by yt-dlp
+*.mp4
+*.mkv
+*.webm
+*.part
+
+# Output directory
+/screenshots/

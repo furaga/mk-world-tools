@@ -1,0 +1,13 @@
+[project]
+name = "mk-world-screenshot"
+version = "0.1.0"
+description = "Takes random screenshots from a Mario Kart World YouTube video."
+dependencies = [
+    "yt-dlp",
+    "opencv-python-headless",
+]
+requires-python = ">=3.8"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta" 
