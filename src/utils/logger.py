@@ -45,12 +45,13 @@ def setup_logger(
     return logger
 
 
+logger = setup_logger("app_default_logger")  # Define a global logger instance
+
 if __name__ == "__main__":
-    # Example usage:
-    logger = setup_logger(__name__)
-    logger.info("This is an info message.")
-    logger.warning("This is a warning message.")
-    logger.error("This is an error message.")
+    # Example usage can leverage the global logger or create a local one for testing this script
+    logger.info("logger.py executed directly: Info message.")
+    logger.warning("logger.py executed directly: Warning message.")
+    logger.error("logger.py executed directly: Error message.")
 
     custom_logger = setup_logger(
         name="custom", log_file=".cache/custom_log.txt", level=logging.DEBUG
