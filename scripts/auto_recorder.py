@@ -306,7 +306,6 @@ def main(args):
 
         # フレームをパースしてゲーム情報を更新
         status_changed, game_info = update_game_info(frame, game_info, parser, obs)
-
         if args.debug:
             logger.info(f"{status_changed=}, {game_info=}")
 
@@ -327,9 +326,9 @@ def main(args):
 
         # 指定されたFPSに合わせてsleep
         if args.fps > 0:
-            time_to_sleep = 1000 / args.fps - int((time.time() - since) * 1000)
+            time_to_sleep = 1.0 / args.fps - (time.time() - since)
             if time_to_sleep > 0:
-                time.sleep(time_to_sleep / 1000)
+                time.sleep(time_to_sleep)
             since = time.time()
 
 
