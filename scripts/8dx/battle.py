@@ -8,8 +8,8 @@ import numpy as np
 import time
 import datetime
 
-from auto_recorder.MK8DXScreenParser import MK8DXAutoRecorder
-from auto_recorder.ScreenParser import MatchInfo, ResultInfo
+from auto_recorder.MK8DXScreenParser import MK8DXScreenParser
+from auto_recorder.ScreenParser import ScreenParser, MatchInfo, ResultInfo
 from OBS.OBSController import OBSController
 from utils.logger import setup_logger
 
@@ -130,7 +130,7 @@ def update_results(
 def parse_frame(
     img: np.ndarray,
     game_info: GameInfo,
-    recorder: MK8DXAutoRecorder,
+    recorder: ScreenParser,
     obs: Optional[OBSController],
 ) -> tuple[GameStatus, GameInfo]:
     # ロビー中(=レース外)：マッチング情報画面を待つ
@@ -232,7 +232,7 @@ def main(args):
                 return None
             return frame
 
-    recorder = MK8DXAutoRecorder(
+    recorder = MK8DXScreenParser(
         Path("data/mk8dx/battle"),
         args.min_my_rate,
         args.max_my_rate,

@@ -6,18 +6,16 @@ from pathlib import Path
 # Assuming MK8DXAutoRecorder and related classes are in src.auto_recorder
 # Adjust the import path if your project structure is different
 from auto_recorder.MK8DXScreenParser import (
-    MK8DXAutoRecorder,
+    MK8DXScreenParser,
     MatchInfo,
-    ResultInfo,
-    Player,
 )
 
 from utils.cv2_util import imread_safe
 
 
-class TestMK8DXAutoRecorder(unittest.TestCase):
+class TestMK8DXScreenParser(unittest.TestCase):
     def test_detect_match_info(self):
-        recorder = MK8DXAutoRecorder(Path("data/mk8dx/battle"))
+        recorder = MK8DXScreenParser(Path("data/mk8dx/battle"))
 
         all_image_paths = Path("tests/auto_recorder/data/match_info").glob("*.png")
         for image_path in all_image_paths:
@@ -29,7 +27,7 @@ class TestMK8DXAutoRecorder(unittest.TestCase):
             self.assertEqual(match_info.course, gt_course)
 
     def test_detect_result(self):
-        recorder = MK8DXAutoRecorder(Path("data/mk8dx/battle"))
+        recorder = MK8DXScreenParser(Path("data/mk8dx/battle"))
 
         all_image_paths = Path("tests/auto_recorder/data/result").glob("*.png")
         for image_path in all_image_paths:

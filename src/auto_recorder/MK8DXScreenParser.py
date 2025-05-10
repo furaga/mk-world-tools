@@ -30,7 +30,7 @@ result_rates_rois = [
 
 
 # テスト用にマリオカート8DXのオートレコーダーを作成
-class MK8DXAutoRecorder(ScreenParser):
+class MK8DXScreenParser(ScreenParser):
     def __init__(
         self,
         template_images_dir: Union[Path, str],
