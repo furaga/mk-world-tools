@@ -7,7 +7,12 @@ import obswebsocket
 
 class OBSController:
     def __init__(
-        self, host: str, port: int, password: str, cache_dir: Path = Path(".cache")
+        self,
+        host: str,
+        port: int,
+        password: str,
+        cache_dir: Path = Path(".cache"),
+        **kwargs,
     ):
         self.host = host
         self.port = port
@@ -15,6 +20,7 @@ class OBSController:
         self.obs_ws_ = obswebsocket.obsws(host, port, password)
         self.obs_ws_.connect()
         self.cache_dir = cache_dir
+        self.config = kwargs
 
     def set_browser_url(self, source_name: str, url: str):
         self.obs_ws_.call(

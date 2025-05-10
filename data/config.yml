@@ -1,0 +1,36 @@
+# 実行引数ではパーサーの種類と出力ファイル、
+fps: 10.0
+imshow: false
+debug: false
+chart_browser_lifetime_sec: 10
+
+obs:
+  host: localhost
+  port: 4444
+  password: "GKzsYMK574JexVLr"
+
+games:
+  mk8dx-race:
+    parser:
+      min_my_rate: 90000
+      max_my_rate: 99999
+    obs:
+      my_rate: "現在レート"
+      my_place: "前回順位"
+      course: "コース情報"
+      chart_browser: "ブラウザ_レート遷移"
+
+  mk8dx-battle:
+    parser:
+      min_my_rate: 900
+      max_my_rate: 1200
+    obs:
+      my_rate: "バトル_現在レート"
+      my_place: "バトル_前回順位"
+      course: "バトル_コース情報"
+      chart_browser: "ブラウザ_レート遷移"
+
+  mkworld-race: null
+  mkworld-survival: null
+  mkworld-battle: null
+
