@@ -1,7 +1,5 @@
 # 実行引数ではパーサーの種類と出力ファイル、
 fps: 10.0
-imshow: false
-debug: false
 chart_browser_lifetime_sec: 10
 
 obs:
@@ -12,6 +10,7 @@ obs:
 games:
   mk8dx-race:
     parser:
+      template_images_dir: data/mk8dx/race
       min_my_rate: 90000
       max_my_rate: 99999
     obs:
@@ -22,6 +21,7 @@ games:
 
   mk8dx-battle:
     parser:
+      template_images_dir: data/mk8dx/battle
       min_my_rate: 900
       max_my_rate: 1200
     obs:

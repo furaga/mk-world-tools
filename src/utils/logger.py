@@ -33,7 +33,7 @@ def setup_logger(
 
     # Create file handler
     file_handler = RotatingFileHandler(
-        log_file, maxBytes=10 * 1024 * 1024, backupCount=5
+        log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
     )  # 10MB per file, 5 backup files
     file_handler.setLevel(level)
     file_formatter = logging.Formatter(

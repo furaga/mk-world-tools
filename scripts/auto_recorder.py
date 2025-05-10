@@ -30,6 +30,8 @@ def parse_args():
         "--video_path", type=Path, default=None, help="指定がなければOBSから画像取得"
     )
     parser.add_argument("--out_csv_path", type=Path, required=True)
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--imshow", action="store_true")
     args = parser.parse_args()
     return args
 
@@ -241,16 +243,14 @@ def capture(
         return frame
 
 
-def create_screen_parser(game: str, **kwargs):
+def create_screen_parser(game: str, debug: bool = False, **kwargs):
     game_title, game_mode = game.split("-")
     if game_title == "mk8dx":
         from screen_parser.MK8DXScreenParser import MK8DXScreenParser
 
         parser = MK8DXScreenParser(
-            Path(f"data/mk8dx/{game_mode}"),
-            kwargs["min_my_rate"],
-            kwargs["max_my_rate"],
-            debug=kwargs["debug"],
+            **kwargs,
+            debug=debug,
         )
         return parser
     elif game_title == "mkworld":
@@ -264,12 +264,12 @@ def main(args):
     logger.info(f"Auto Recorder {args.game}")
     logger.info("================================================")
 
-    parser_config = config[args.game]["parser"]
-    obs_config = config["obs"] | config[args.game]["obs"]
+    parser_config = config["games"][args.game]["parser"]
+    obs_config = config["obs"] | config["games"][args.game]["obs"]
     logger.info(f"OBS config: {obs_config}")
 
     # 画像認識のためのrecorderを作成
-    parser = create_screen_parser(**parser_config)
+    parser = create_screen_parser(args.game, args.debug, **parser_config)
     logger.info(f"Created a screen parser for {args.game}")
 
     # 画像入力のためのOBSまたはVideoCapture
@@ -303,7 +303,7 @@ def main(args):
 
         # フレームをパースしてゲーム情報を更新
         status_changed, game_info = update_game_info(frame, game_info, parser, obs)
-        if config["debug"]:
+        if args.debug:
             logger.info(f"{status_changed=}, {game_info=}")
 
         # 状態変化した場合の処理
@@ -316,7 +316,7 @@ def main(args):
                 game_info = GameInfo(status=GameStatus.LOBBY)
 
         # デバッグ用に画面を表示
-        if config["imshow"]:
+        if args.imshow:
             cv2.imshow("frame", frame)
             if cv2.waitKey(1) == ord("q"):
                 break
