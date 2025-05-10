@@ -2,7 +2,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-DEFAULT_LOG_FILE = ".cache/log.txt"
+DEFAULT_LOG_FILE = ".cache/app.log"
 
 
 def setup_logger(

@@ -29,9 +29,10 @@ def parse_args():
     parser.add_argument("--video_path", type=Path, default=None)
     parser.add_argument("--out_csv_path", type=Path, required=True)
     parser.add_argument("--imshow", action="store_true")
-    parser.add_argument("--min_my_rate", type=int, default=1600)
-    parser.add_argument("--max_my_rate", type=int, default=5000)
+    parser.add_argument("--min_my_rate", type=int, default=900)
+    parser.add_argument("--max_my_rate", type=int, default=1200)
     parser.add_argument("--fps", type=float, default=10)
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
     return args
 
@@ -82,7 +83,6 @@ def count_valid_rates(rates: List[int]):
 def update_match_info(
     match_info: MatchInfo, game_info: GameInfo, obs: Optional[OBSController]
 ):
-    print(f"update_match_info: {match_info}")
     rates_in_match_info = [p.rate for p in match_info.players]
     n_valid = count_valid_rates(rates_in_match_info)
     prev_n_valid = count_valid_rates(game_info.rates_in_match_info)
@@ -185,9 +185,8 @@ def save_game_info(out_csv_path, game_info):
     mid_rate = np.median(valid_rates)
     min_rate = np.min(valid_rates)
     max_rate = np.max(valid_rates)
-    print(
-        f"[{game_info.course} ({game_info.rule})] Place={game_info.my_place}, VR={game_info.my_rate}, {len(valid_rates)} players, {mid_rate} ({min_rate}-{max_rate})",
-        flush=True,
+    logger.info(
+        f"[{game_info.course} ({game_info.rule})] Place={game_info.my_place}, BR={game_info.my_rate}, {len(valid_rates)} players, {mid_rate} ({min_rate}-{max_rate})",
     )
 
 
@@ -234,7 +233,10 @@ def main(args):
             return frame
 
     recorder = MK8DXAutoRecorder(
-        Path("data/mk8dx/battle"), args.min_my_rate, args.max_my_rate
+        Path("data/mk8dx/battle"),
+        args.min_my_rate,
+        args.max_my_rate,
+        debug=args.debug,
     )
     game_info = GameInfo()
     chart_visible = True
@@ -252,7 +254,9 @@ def main(args):
 
         # フレームをパース
         next_status, game_info = parse_frame(frame, game_info, recorder, obs)
-        print(f"[{next_status}] {game_info}")
+
+        if args.debug:
+            logger.info(f"[{next_status}] {game_info}")
 
         # 状態変化した場合の処理
         if next_status != GameStatus.NO_CHANGE:

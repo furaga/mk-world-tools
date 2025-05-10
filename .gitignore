@@ -180,4 +180,4 @@ cython_debug/
 *.part
 
 # Output directory
-/screenshots/
+data/screenshots/
