@@ -40,3 +40,12 @@ def imwrite_safe(filename: str, img: np.ndarray, params: Optional[Any] = None):
     except Exception as e:
         logger.error(f"Failed to write image file: {filename} - {e}", exc_info=True)
         return False
+
+
+def crop_img(img: np.ndarray, roi: list[float]) -> np.ndarray:
+    h, w = img.shape[:2]
+    img = img[
+        max(0, int(h * roi[1])) : min(h, int(h * roi[3])),
+        max(0, int(w * roi[0])) : min(w, int(w * roi[2])),
+    ]
+    return img
