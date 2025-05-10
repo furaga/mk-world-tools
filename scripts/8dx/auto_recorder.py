@@ -8,7 +8,6 @@ import numpy as np
 import time
 import datetime
 
-from auto_recorder.MK8DXScreenParser import MK8DXScreenParser
 from auto_recorder.ScreenParser import ScreenParser, MatchInfo, ResultInfo
 from OBS.OBSController import OBSController
 from utils.logger import setup_logger
@@ -26,6 +25,7 @@ class GameStatus(Enum):
 def parse_args():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--obs_pass", type=str, default="")
+    parser.add_argument("--game", type=str, choices=["mk8dx", "mkworld"], required=True)
     parser.add_argument("--video_path", type=Path, default=None)
     parser.add_argument("--out_csv_path", type=Path, required=True)
     parser.add_argument("--imshow", action="store_true")
@@ -232,12 +232,20 @@ def main(args):
                 return None
             return frame
 
-    recorder = MK8DXScreenParser(
-        Path("data/mk8dx/battle"),
-        args.min_my_rate,
-        args.max_my_rate,
-        debug=args.debug,
-    )
+    if args.game == "mk8dx":
+        from auto_recorder.MK8DXScreenParser import MK8DXScreenParser
+
+        recorder = MK8DXScreenParser(
+            Path("data/mk8dx/battle"),
+            args.min_my_rate,
+            args.max_my_rate,
+            debug=args.debug,
+        )
+    elif args.game == "mkworld":
+        raise NotImplementedError("MK World is not supported yet")
+    else:
+        raise ValueError(f"Invalid game: {args.game}")
+
     game_info = GameInfo()
     chart_visible = True
     chart_appear_time = -10000
