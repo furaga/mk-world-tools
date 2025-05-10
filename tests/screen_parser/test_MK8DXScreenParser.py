@@ -3,9 +3,9 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 from pathlib import Path
 
-# Assuming MK8DXAutoRecorder and related classes are in src.auto_recorder
+# Assuming MK8DXAutoRecorder and related classes are in src.screen_parser
 # Adjust the import path if your project structure is different
-from auto_recorder.MK8DXScreenParser import (
+from screen_parser.MK8DXScreenParser import (
     MK8DXScreenParser,
     MatchInfo,
 )
@@ -17,7 +17,7 @@ class TestMK8DXScreenParser(unittest.TestCase):
     def test_detect_match_info(self):
         recorder = MK8DXScreenParser(Path("data/mk8dx/battle"))
 
-        all_image_paths = Path("tests/auto_recorder/data/match_info").glob("*.png")
+        all_image_paths = Path("tests/screen_parser/data/match_info").glob("*.png")
         for image_path in all_image_paths:
             img = imread_safe(str(image_path))
             gt_rule, gt_course = image_path.stem.split("_")
@@ -29,7 +29,7 @@ class TestMK8DXScreenParser(unittest.TestCase):
     def test_detect_result(self):
         recorder = MK8DXScreenParser(Path("data/mk8dx/battle"))
 
-        all_image_paths = Path("tests/auto_recorder/data/result").glob("*.png")
+        all_image_paths = Path("tests/screen_parser/data/result").glob("*.png")
         for image_path in all_image_paths:
             img = imread_safe(str(image_path))
 

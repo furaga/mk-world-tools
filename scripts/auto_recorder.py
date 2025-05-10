@@ -9,7 +9,7 @@ import numpy as np
 import time
 import datetime
 
-from auto_recorder.ScreenParser import ScreenParser, MatchInfo, ResultInfo
+from screen_parser.ScreenParser import ScreenParser, MatchInfo, ResultInfo
 from OBS.OBSController import OBSController
 from utils.logger import setup_logger
 
@@ -251,7 +251,7 @@ def capture(
 def create_screen_parser(game: str, **kwargs):
     game_title, game_mode = game.split("-")
     if game_title == "mk8dx":
-        from auto_recorder.MK8DXScreenParser import MK8DXScreenParser
+        from screen_parser.MK8DXScreenParser import MK8DXScreenParser
 
         parser = MK8DXScreenParser(
             Path(f"data/mk8dx/{game_mode}"),
