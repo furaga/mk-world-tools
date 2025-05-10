@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 from typing import List, Optional, Any, Dict
+from enum import Enum, auto
 
 import cv2
 import numpy as np
@@ -14,14 +15,21 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+class GameStatus(Enum):
+    NO_CHANGE = auto()
+    LOBBY = auto()
+    RACE = auto()
+    RESULT = auto()
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--obs_pass", type=str, default="")
     parser.add_argument("--video_path", type=Path, default=None)
     parser.add_argument("--out_csv_path", type=Path, required=True)
     parser.add_argument("--imshow", action="store_true")
-    parser.add_argument("--max_my_rate", type=int, default=5000)
     parser.add_argument("--min_my_rate", type=int, default=1600)
+    parser.add_argument("--max_my_rate", type=int, default=5000)
     parser.add_argument("--fps", type=float, default=10)
     args = parser.parse_args()
     return args
@@ -29,7 +37,7 @@ def parse_args():
 
 class GameInfo:
     def __init__(self):
-        self.status: str = "none"
+        self.status: GameStatus = GameStatus.LOBBY
         self.course: str = ""
         self.race_type: str = ""
         self.rates_in_match_info: List[int] = [0 for _ in range(12)]
@@ -67,78 +75,82 @@ def count_valid_rates(rates: List[int]):
     return len([rate for rate in rates if rate > 0])
 
 
+def update_match_info(match_info, game_info, obs):
+    rates_in_match_info = [p.rate for p in match_info.players]
+    n_valid = count_valid_rates(rates_in_match_info)
+    prev_n_valid = count_valid_rates(game_info.rates_in_match_info)
+
+    # 前のフレームより多くのプレイヤーを認識できた場合、
+    # より正確に画像認識できている可能性が高いので、そのフレームの認識結果を採用する
+    # （ただし、最低でも3人は認識できていないと誤検知の可能性が高いので採用しない）
+    if n_valid >= prev_n_valid and prev_n_valid >= 3:
+        game_info.rates_in_match_info = rates_in_match_info
+        game_info.course = match_info.course
+        game_info.race_type = match_info.rule
+        if obs:
+            obs.set_text(
+                "バトル_コース情報",
+                f"{game_info.course}, {game_info.race_type}",
+            )
+        return True
+    return False
+
+
+def update_results(result_info, game_info, obs):
+    rates_in_result = [p.rate for p in result_info.players]
+    n_valid = count_valid_rates(rates_in_result)
+    prev_n_valid = count_valid_rates(game_info.rates_in_result)
+
+    # 前のフレームより多くのプレイヤーを認識できた場合、
+    # より正確に画像認識できている可能性が高いので、そのフレームの認識結果を採用する
+    # （ただし、最低でも3人は認識できていないと誤検知の可能性が高いので採用しない）
+    if n_valid >= prev_n_valid and prev_n_valid >= 3:
+        game_info.my_rate = result_info.my_rate
+        game_info.my_place = result_info.my_place
+        game_info.rates_in_result = rates_in_result
+        if obs and prev_n_valid == n_valid:
+            # 認識数が安定したらOBSに反映する
+            OBS_apply_rate(obs, game_info)
+
+        # 結果が更新されたらTrueを返す
+        return True
+    return False
+
+
 def parse_frame(
     img: np.ndarray,
-    status: str,
     game_info: GameInfo,
     recorder: MK8DXAutoRecorder,
     obs: Optional[OBSController],
-):
-    def _update_match_info(match_info, game_info, obs):
-        rates_in_match_info = [p.rate for p in match_info.players]
-        n_valid = count_valid_rates(rates_in_match_info)
-        prev_n_valid = count_valid_rates(game_info.rates_in_match_info)
-
-        # 前のフレームより多くのプレイヤーを認識できた場合、
-        # より正確に画像認識できている可能性が高いので、そのフレームの認識結果を採用する
-        # （ただし、最低でも3人は認識できていないと誤検知の可能性が高いので採用しない）
-        if n_valid >= prev_n_valid and prev_n_valid >= 3:
-            game_info.rates_in_match_info = rates_in_match_info
-            game_info.course = match_info.course
-            game_info.race_type = match_info.rule
-            if obs:
-                obs.set_text(
-                    "バトル_コース情報",
-                    f"{game_info.course}, {game_info.race_type}",
-                )
-            return True
-        return False
-
-    if status == "none":
-        # マッチング情報画面を探す
+) -> tuple[GameStatus, GameInfo]:
+    # ロビー中(=レース外)：マッチング情報画面を待つ
+    if game_info.status == GameStatus.LOBBY:
         ret, match_info = recorder.detect_match_info(img)
-        if ret and _update_match_info(match_info, game_info, obs):
-            return "race", game_info
+        if ret and update_match_info(match_info, game_info, obs):
+            return GameStatus.RACE, game_info
         else:
-            return "", game_info
+            return GameStatus.NO_CHANGE, game_info
 
-    def _update_results(result_info, game_info, obs):
-        rates_in_result = [p.rate for p in result_info.players]
-        n_valid = count_valid_rates(rates_in_result)
-        prev_n_valid = count_valid_rates(game_info.rates_in_result)
+    # レース中：リザルトが出るのを待つ
+    if game_info.status == GameStatus.RACE:
+        ret, result_info = recorder.detect_result(
+            img,
+            match_info,
+        )
+        if ret and update_results(result_info, game_info, obs):
+            return GameStatus.RESULT, game_info
+        else:
+            return GameStatus.NO_CHANGE, game_info
 
-        # 前のフレームより多くのプレイヤーを認識できた場合、
-        # より正確に画像認識できている可能性が高いので、そのフレームの認識結果を採用する
-        # （ただし、最低でも3人は認識できていないと誤検知の可能性が高いので採用しない）
-        if n_valid >= prev_n_valid and prev_n_valid >= 3:
-            game_info.my_rate = result_info.my_rate
-            game_info.my_place = result_info.my_place
-            game_info.rates_in_result = rates_in_result
-            if obs and prev_n_valid == n_valid:
-                # 認識数が安定したらOBSに反映する
-                OBS_apply_rate(obs, game_info)
-
-            # 結果が更新されたらTrueを返す
-            return True
-        return False
-
-    if status == "race":
-        # 結果画面を探す
+    # リザルト表示中：リザルトが消えるまで待つ
+    if game_info.status == GameStatus.RESULT:
         ret, result_info = recorder.detect_result(img, match_info)
-        if ret and _update_results(result_info, game_info, obs):
-            return "result", game_info
+        if ret and update_results(result_info, game_info, obs):
+            return GameStatus.NO_CHANGE, game_info
         else:
-            return "", game_info
+            return GameStatus.LOBBY, game_info
 
-    if status == "result":
-        # 結果が更新されなくなるまで待機
-        ret, result_info = recorder.detect_result(img, match_info)
-        if ret and _update_results(result_info, game_info, obs):
-            return "", game_info
-        else:
-            return "none", game_info
-
-    return "", game_info
+    return GameStatus.NO_CHANGE, game_info
 
 
 def save_race_info(out_csv_path, race_info):
@@ -213,7 +225,9 @@ def main(args):
                 return None
             return frame
 
-    recorder = MK8DXAutoRecorder(Path("data/mk8dx/battle"))
+    recorder = MK8DXAutoRecorder(
+        Path("data/mk8dx/battle"), args.min_my_rate, args.max_my_rate
+    )
     game_info = GameInfo()
     chart_visible = True
     chart_appear_time = -10000
@@ -232,12 +246,11 @@ def main(args):
         next_status, game_info = parse_frame(frame, game_info, recorder, obs)
 
         # 状態変化した場合の処理
-        if next_status != game_info.status:
-            if next_status != "":
-                game_info.status = next_status
-                logger.info(f"Status changed: {game_info.status} -> {next_status}")
+        if next_status != GameStatus.NO_CHANGE:
+            logger.info(f"Status: {game_info.status.name} -> {next_status.name}")
+            game_info.status = next_status  # Update to the suggested state
 
-            if game_info.status == "none":
+            if game_info.status == GameStatus.LOBBY:
                 # レース終了したので情報保存・推移表表示・リセットする
                 save_race_info(args.out_csv_path, game_info)
                 chart_visible, chart_appear_time = show_chart(obs)

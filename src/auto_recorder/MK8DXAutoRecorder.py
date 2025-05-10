@@ -31,11 +31,21 @@ result_rates_rois = [
 
 # テスト用にマリオカート8DXのオートレコーダーを作成
 class MK8DXAutoRecorder(AutoRecorder):
-    def __init__(self, template_images_dir: Union[Path, str], debug=False):
-        template_images_dir = Path(template_images_dir)
+    def __init__(
+        self,
+        template_images_dir: Union[Path, str],
+        min_my_rate: int = 1000,
+        max_my_rate: int = 99999,
+        debug=False,
+    ):
         self.course_dict = {}
         self.race_type_dict = {}
         self.debug = debug
+        self.min_my_rate = min_my_rate
+        self.max_my_rate = max_my_rate
+
+        # テンプレート画像を読み込む
+        template_images_dir = Path(template_images_dir)
         for d in (template_images_dir / "courses").glob("*"):
             for img_path in d.glob("*.png"):
                 tmpl = imread_safe(str(img_path))
@@ -71,7 +81,9 @@ class MK8DXAutoRecorder(AutoRecorder):
     def detect_result(
         self, img: np.ndarray, match_info: MatchInfo
     ) -> Tuple[bool, ResultInfo]:
-        ret, my_rate, place, rates = self._rates_in_result(img, match_info.rule)
+        ret, my_rate, place, rates = self._rates_in_result(
+            img, match_info.rule, self.min_my_rate, self.max_my_rate
+        )
         if not ret:
             return False, None
 
