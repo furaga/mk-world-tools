@@ -1,4 +1,4 @@
-from .AutoRecorder import AutoRecorder, MatchInfo, ResultInfo, Player
+from .ScreenParser import ScreenParser, MatchInfo, ResultInfo, Player
 import numpy as np
 from typing import Tuple, Union
 from pathlib import Path
@@ -30,7 +30,7 @@ result_rates_rois = [
 
 
 # テスト用にマリオカート8DXのオートレコーダーを作成
-class MK8DXAutoRecorder(AutoRecorder):
+class MK8DXAutoRecorder(ScreenParser):
     def __init__(
         self,
         template_images_dir: Union[Path, str],

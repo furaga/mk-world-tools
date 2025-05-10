@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Assuming MK8DXAutoRecorder and related classes are in src.auto_recorder
 # Adjust the import path if your project structure is different
-from src.auto_recorder.MK8DXAutoRecorder import (
+from auto_recorder.MK8DXScreenParser import (
     MK8DXAutoRecorder,
     MatchInfo,
     ResultInfo,

@@ -23,7 +23,7 @@ class ResultInfo(BaseModel):
     my_place: int
 
 
-class AutoRecorder(ABC):
+class ScreenParser(ABC):
     @abstractmethod
     def detect_match_info(self, img: np.ndarray) -> Tuple[bool, MatchInfo]:
         """

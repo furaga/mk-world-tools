@@ -8,8 +8,8 @@ import numpy as np
 import time
 import datetime
 
-from auto_recorder.MK8DXAutoRecorder import MK8DXAutoRecorder
-from auto_recorder.AutoRecorder import MatchInfo, ResultInfo
+from auto_recorder.MK8DXScreenParser import MK8DXAutoRecorder
+from auto_recorder.ScreenParser import MatchInfo, ResultInfo
 from OBS.OBSController import OBSController
 from utils.logger import setup_logger
 
