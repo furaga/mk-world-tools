@@ -7,17 +7,13 @@
 - Python 3.12.5
 - uv 0.6.14 (a4cec56dc 2025-04-09)
 
-## セットアップ
+
+## Quick Start
 
 ```bash
-uv pip sync pyproject.toml
+make mk8dx-battle
+# make mk8dx-battle ARGS="--imshow  --video_path .cache/battle.mkv"
 ```
-
-## Makefile の使い方
-
-`make` コマンドを使用して、各種スクリプトを実行できます。
-
-### 利用可能なターゲット
 
 `Makefile` には以下のターゲットが定義されています。
 
@@ -28,11 +24,6 @@ uv pip sync pyproject.toml
 - `mkworld-battle`
 
 各ターゲットは、対応するゲームの `./scripts/auto_recorder.py` を実行します。
-
-例:
-```bash
-make mk8dx-race
-```
 
 ### 追加の引数を渡す
 

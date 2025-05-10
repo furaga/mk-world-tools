@@ -1,5 +1,5 @@
 [project]
-name = "mk-world-screenshot"
+name = "mk-world-tools"
 version = "0.1.0"
 description = "Takes random screenshots from a Mario Kart World YouTube video."
 dependencies = [
@@ -15,7 +15,7 @@ dependencies = [
     "pydantic==2.11.4",
     "websocket-client==1.8.0",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 [project.optional-dependencies]
 test = [
