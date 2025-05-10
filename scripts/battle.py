@@ -27,15 +27,15 @@ def parse_args():
     return args
 
 
-class RaceInfo:
+class GameInfo:
     def __init__(self):
+        self.status: str = "none"
         self.course: str = ""
         self.race_type: str = ""
-        self.place: int = 0
-        self.rates: List[int] = [0 for _ in range(12)]
-        self.rates_after: List[int] = [0 for _ in range(12)]
+        self.rates_in_match_info: List[int] = [0 for _ in range(12)]
+        self.rates_in_result: List[int] = [0 for _ in range(12)]
+        self.my_place: int = 0
         self.my_rate: int = 0
-        self.delta_rate: Optional[int] = None
 
     def __repr__(self) -> str:
         return (
@@ -43,11 +43,11 @@ class RaceInfo:
             + ","
             + self.race_type
             + ","
-            + str(self.place)
+            + str(self.my_place)
             + ","
             + str(self.my_rate)
             + " | "
-            + ",".join([str(r) for r in self.rates])
+            + ",".join([str(r) for r in self.rates_in_match_info])
         )
 
 
@@ -63,76 +63,85 @@ def OBS_apply_rate(obs: OBSController, race_info):
         obs.set_color("バトル_前回順位", (255, 255, 255))
 
 
+def count_valid_rates(rates: List[int]):
+    return len([rate for rate in rates if rate > 0])
+
+
 def parse_frame(
-    img,
-    ts,
-    status,
-    race_info: RaceInfo,
+    img: np.ndarray,
+    status: str,
+    game_info: GameInfo,
     recorder: MK8DXAutoRecorder,
     obs: Optional[OBSController],
-    history: List[Dict[str, Any]],
 ):
-    history.append({"ts": ts, "status": status, "visible_coin_lap": False})
-    while len(history) > 10:
-        history.pop(0)
+    def _update_match_info(match_info, game_info, obs):
+        rates_in_match_info = [p.rate for p in match_info.players]
+        n_valid = count_valid_rates(rates_in_match_info)
+        prev_n_valid = count_valid_rates(game_info.rates_in_match_info)
 
-    ret, match_info = recorder.detect_match_info(img)
-    if ret:
-        rates = [p.rate for p in match_info.players]
-        n_valid = len([x for x in rates if x > 0])
-        if n_valid >= 3:
-            history[-1].update({"rates": rates})
-            prev_n_valid = len([x for x in race_info.rates if x > 0])
-            if prev_n_valid <= n_valid:
-                race_info.rates = rates
-            course, race_type = match_info.course, match_info.rule
-            race_info.course = course
-            race_info.race_type = race_type
+        # 前のフレームより多くのプレイヤーを認識できた場合、
+        # より正確に画像認識できている可能性が高いので、そのフレームの認識結果を採用する
+        # （ただし、最低でも3人は認識できていないと誤検知の可能性が高いので採用しない）
+        if n_valid >= prev_n_valid and prev_n_valid >= 3:
+            game_info.rates_in_match_info = rates_in_match_info
+            game_info.course = match_info.course
+            game_info.race_type = match_info.rule
             if obs:
-                obs.set_text("バトル_コース情報", f"{course}, {race_type}")
-            return "race", race_info
+                obs.set_text(
+                    "バトル_コース情報",
+                    f"{game_info.course}, {game_info.race_type}",
+                )
+            return True
+        return False
+
+    if status == "none":
+        # マッチング情報画面を探す
+        ret, match_info = recorder.detect_match_info(img)
+        if ret and _update_match_info(match_info, game_info, obs):
+            return "race", game_info
+        else:
+            return "", game_info
+
+    def _update_results(result_info, game_info, obs):
+        rates_in_result = [p.rate for p in result_info.players]
+        n_valid = count_valid_rates(rates_in_result)
+        prev_n_valid = count_valid_rates(game_info.rates_in_result)
+
+        # 前のフレームより多くのプレイヤーを認識できた場合、
+        # より正確に画像認識できている可能性が高いので、そのフレームの認識結果を採用する
+        # （ただし、最低でも3人は認識できていないと誤検知の可能性が高いので採用しない）
+        if n_valid >= prev_n_valid and prev_n_valid >= 3:
+            game_info.my_rate = result_info.my_rate
+            game_info.my_place = result_info.my_place
+            game_info.rates_in_result = rates_in_result
+            if obs and prev_n_valid == n_valid:
+                # 認識数が安定したらOBSに反映する
+                OBS_apply_rate(obs, game_info)
+
+            # 結果が更新されたらTrueを返す
+            return True
+        return False
 
     if status == "race":
-        # 結果表のパース
-        ret, my_rate, place, rates_after = recorder.detect_result(img, match_info)
-        if ret:
-            history[-1].update({"my_rate": my_rate})
-            race_info.my_rate = my_rate
-            if len(history) >= 2 and "my_rate" in history[-2]:
-                race_info.delta_rate = my_rate - history[-2]["my_rate"]
-            else:
-                race_info.delta_rate = None
-            race_info.place = place
-            n_valid = len([x for x in rates_after if x > 0])
-            if n_valid >= 3:
-                prev_n_valid = len([x for x in race_info.rates_after if x > 0])
-                if prev_n_valid <= n_valid:
-                    race_info.rates_after = rates_after
-                if obs:
-                    OBS_apply_rate(obs, race_info)
-                return "result", race_info
+        # 結果画面を探す
+        ret, result_info = recorder.detect_result(img, match_info)
+        if ret and _update_results(result_info, game_info, obs):
+            return "result", game_info
+        else:
+            return "", game_info
 
     if status == "result":
-        # 結果表のパース
+        # 結果が更新されなくなるまで待機
         ret, result_info = recorder.detect_result(img, match_info)
-        if ret:
-            history[-1].update({"my_rate": result_info.my_rate})
-            race_info.my_rate = result_info.my_rate
-            race_info.place = result_info.place
-            n_valid = len([p.rate for p in result_info.players if p.rate > 0])
-            prev_n_valid = len([rate for rate in race_info.rates_after if rate > 0])
-            if prev_n_valid <= n_valid:
-                race_info.rates_after = [p.rate for p in result_info.players]
-            if obs:
-                OBS_apply_rate(obs, race_info)
-            return "", race_info
+        if ret and _update_results(result_info, game_info, obs):
+            return "", game_info
         else:
-            return "none", race_info
+            return "none", game_info
 
-    return "", race_info
+    return "", game_info
 
 
-def save_race_info(out_csv_path, ts, race_info):
+def save_race_info(out_csv_path, race_info):
     header = ["ts", "course", "race_type", "place", "my_rate"]
     header += [f"rates_{i}" for i in range(12)]
     header += [f"rates_after_{i}" for i in range(12)]
@@ -141,6 +150,7 @@ def save_race_info(out_csv_path, ts, race_info):
         with open(out_csv_path, "w", encoding="utf8") as f:
             f.write(",".join(header) + "\n")
 
+    ts = datetime.datetime.now().strftime("%Y-%m-%d@%H:%M:%S")
     with open(out_csv_path, "a", encoding="utf8") as f:
         text = str(ts) + ","
         text += race_info.course + ","
@@ -204,13 +214,10 @@ def main(args):
             return frame
 
     recorder = MK8DXAutoRecorder(Path("data/mk8dx/battle"))
-
-    status = "none"
-    race_info = RaceInfo()
+    game_info = GameInfo()
     chart_visible = True
     chart_appear_time = -10000
     since = time.time()
-    history: List[Dict[str, Any]] = []
     while True:
         # レートの推移表の表示・非表示状態を更新
         chart_visible = update_chart_visible(chart_visible, chart_appear_time, obs)
@@ -221,28 +228,20 @@ def main(args):
             logger.info("End of video")
             break
 
-        # 現在時刻を取得
-        now = datetime.datetime.now()
-        now_str = now.strftime("%Y-%m-%d@%H:%M:%S")
-
         # フレームをパース
-        next_status, race_info = parse_frame(
-            frame, now_str, status, race_info, recorder, obs, history
-        )
+        next_status, game_info = parse_frame(frame, game_info, recorder, obs)
 
         # 状態変化した場合の処理
-        if next_status != status:
-            race_finished = next_status == "none"
-            if race_finished:
-                # noneに変化（=レース終了）したら、レース情報を保存して、レート遷移の表示をONにする
-                save_race_info(args.out_csv_path, now_str, race_info)
-                chart_visible, chart_appear_time = show_chart(obs)
-                race_info = RaceInfo()
+        if next_status != game_info.status:
+            if next_status != "":
+                game_info.status = next_status
+                logger.info(f"Status changed: {game_info.status} -> {next_status}")
 
-            status_changed = next_status != ""
-            if status_changed:
-                status = next_status
-                logger.info(f"Status changed: {status} -> {next_status}")
+            if game_info.status == "none":
+                # レース終了したので情報保存・推移表表示・リセットする
+                save_race_info(args.out_csv_path, game_info)
+                chart_visible, chart_appear_time = show_chart(obs)
+                game_info = GameInfo()
 
         # デバッグ用に画面を表示
         if args.imshow:
