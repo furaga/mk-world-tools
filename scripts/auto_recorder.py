@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 from typing import List, Optional, Any, Dict
+from pydantic import BaseModel
 from enum import Enum, auto
 
 import cv2
@@ -14,18 +15,19 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-
-class GameStatus(Enum):
-    NO_CHANGE = auto()
-    LOBBY = auto()
-    RACE = auto()
-    RESULT = auto()
+supported_games = [
+    "mk8dx-race",
+    "mk8dx-battle",
+    "mkworld-race",
+    "mkworld-survival",
+    "mkworld-battle",
+]
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--obs_pass", type=str, default="")
-    parser.add_argument("--game", type=str, choices=["mk8dx", "mkworld"], required=True)
+    parser.add_argument("--game", type=str, choices=supported_games, required=True)
     parser.add_argument("--video_path", type=Path, default=None)
     parser.add_argument("--out_csv_path", type=Path, required=True)
     parser.add_argument("--imshow", action="store_true")
@@ -37,31 +39,59 @@ def parse_args():
     return args
 
 
-class GameInfo:
-    def __init__(self):
-        self.status: GameStatus = GameStatus.LOBBY
-        self.course: str = ""
-        self.rule: str = ""
-        self.rates_in_match_info: List[int] = [0 for _ in range(12)]
-        self.rates_in_result: List[int] = [0 for _ in range(12)]
-        self.my_place: int = 0
-        self.my_rate: int = 0
-        self.match_info: Optional[MatchInfo] = None
+class GameStatus(Enum):
+    NO_CHANGE = auto()
+    LOBBY = auto()
+    RACE = auto()
+    RESULT = auto()
 
-    def __repr__(self) -> str:
-        return (
-            self.status.name
-            + ","
-            + self.course
-            + ","
-            + self.rule
-            + ","
-            + str(self.my_place)
-            + ","
-            + str(self.my_rate)
-            + " | "
-            + ",".join([str(r) for r in self.rates_in_match_info])
-        )
+
+class GameInfo(BaseModel):
+    status: GameStatus = GameStatus.NO_CHANGE
+    result_info: Optional[ResultInfo] = None
+    match_info: Optional[MatchInfo] = None
+
+    @property
+    def course(self) -> str:
+        if self.match_info:
+            return self.match_info.course
+        else:
+            return ""
+
+    @property
+    def rule(self) -> str:
+        if self.match_info:
+            return self.match_info.rule
+        else:
+            return ""
+
+    @property
+    def my_place(self) -> int:
+        if self.result_info:
+            return self.result_info.my_place
+        else:
+            return 0
+
+    @property
+    def my_rate(self) -> int:
+        if self.result_info:
+            return self.result_info.my_rate
+        else:
+            return 0
+
+    @property
+    def rates_in_match_info(self) -> List[int]:
+        if self.match_info:
+            return [p.rate for p in self.match_info.players]
+        else:
+            return [0 for _ in range(12)]
+
+    @property
+    def rates_in_result(self) -> List[int]:
+        if self.result_info:
+            return [p.rate for p in self.result_info.players]
+        else:
+            return [0 for _ in range(12)]
 
 
 def OBS_apply_rate(obs: OBSController, game_info: GameInfo):
@@ -91,9 +121,6 @@ def update_match_info(
     # より正確に画像認識できている可能性が高いので、そのフレームの認識結果を採用する
     # （ただし、最低でも3人は認識できていないと誤検知の可能性が高いので採用しない）
     if n_valid >= max(prev_n_valid, 3):
-        game_info.rates_in_match_info = rates_in_match_info
-        game_info.course = match_info.course
-        game_info.rule = match_info.rule
         game_info.match_info = match_info
         if obs:
             obs.set_text(
@@ -115,49 +142,47 @@ def update_results(
     # より正確に画像認識できている可能性が高いので、そのフレームの認識結果を採用する
     # （ただし、最低でも3人は認識できていないと誤検知の可能性が高いので採用しない）
     if n_valid >= max(prev_n_valid, 3):
-        game_info.my_rate = result_info.my_rate
-        game_info.my_place = result_info.my_place
-        game_info.rates_in_result = rates_in_result
+        game_info.result_info = result_info
         if obs and prev_n_valid == n_valid:
-            # 認識数が安定したらOBSに反映する
             OBS_apply_rate(obs, game_info)
-
-        # 結果が更新されたらTrueを返す
         return True
     return False
 
 
-def parse_frame(
+def update_game_info(
     img: np.ndarray,
     game_info: GameInfo,
-    recorder: ScreenParser,
+    parser: ScreenParser,
     obs: Optional[OBSController],
-) -> tuple[GameStatus, GameInfo]:
+) -> tuple[bool, GameInfo]:
     # ロビー中(=レース外)：マッチング情報画面を待つ
     if game_info.status == GameStatus.LOBBY:
-        ret, match_info = recorder.detect_match_info(img)
+        ret, match_info = parser.detect_match_info(img)
         if ret and update_match_info(match_info, game_info, obs):
-            return GameStatus.RACE, game_info
+            game_info.status = GameStatus.RACE
+            return True, game_info
         else:
-            return GameStatus.NO_CHANGE, game_info
+            return False, game_info
 
     # レース中：リザルトが出るのを待つ
     if game_info.status == GameStatus.RACE:
-        ret, result_info = recorder.detect_result(img, game_info.match_info)
+        ret, result_info = parser.detect_result(img, game_info.match_info)
         if ret and update_results(result_info, game_info, obs):
-            return GameStatus.RESULT, game_info
+            game_info.status = GameStatus.RESULT
+            return True, game_info
         else:
-            return GameStatus.NO_CHANGE, game_info
+            return False, game_info
 
     # リザルト表示中：リザルトが消えるまで待つ
     if game_info.status == GameStatus.RESULT:
-        ret, result_info = recorder.detect_result(img, game_info.match_info)
+        ret, result_info = parser.detect_result(img, game_info.match_info)
         if ret and update_results(result_info, game_info, obs):
-            return GameStatus.NO_CHANGE, game_info
+            return False, game_info
         else:
-            return GameStatus.LOBBY, game_info
+            game_info.status = GameStatus.LOBBY
+            return True, game_info
 
-    return GameStatus.NO_CHANGE, game_info
+    return False, game_info
 
 
 def save_game_info(out_csv_path, game_info):
@@ -190,7 +215,7 @@ def save_game_info(out_csv_path, game_info):
     )
 
 
-def show_chart(
+def show_chart_browser(
     obs: Optional[OBSController] = None,
 ):
     if obs:
@@ -198,7 +223,7 @@ def show_chart(
     return True, time.time()
 
 
-def update_chart_visible(
+def update_chart_browser(
     chart_visible: bool,
     chart_appear_time: float,
     obs: Optional[OBSController] = None,
@@ -210,72 +235,89 @@ def update_chart_visible(
     return chart_visible
 
 
-def main(args):
-    logger.info("BATTLE MODE")
+def capture(
+    obs: Optional[OBSController], cap: Optional[cv2.VideoCapture]
+) -> Optional[np.ndarray]:
+    if obs:
+        return obs.capture_game_screen()
+    else:
+        for _ in range(100):
+            ret, frame = cap.read()
+        if not ret:
+            return None
+        return frame
 
+
+def create_screen_parser(game: str, **kwargs):
+    game_title, game_mode = game.split("-")
+    if game_title == "mk8dx":
+        from auto_recorder.MK8DXScreenParser import MK8DXScreenParser
+
+        parser = MK8DXScreenParser(
+            Path(f"data/mk8dx/{game_mode}"),
+            kwargs["min_my_rate"],
+            kwargs["max_my_rate"],
+            debug=kwargs["debug"],
+        )
+        return parser
+    elif game_title == "mkworld":
+        raise NotImplementedError("MK World is not supported yet")
+    else:
+        raise ValueError(f"Invalid game: {game}")
+
+
+def main(args):
+    logger.info("================================================")
+    logger.info(f"Auto Recorder {args.game}")
+    logger.info("================================================")
+
+    # 画像認識のためのrecorderを作成
+    parser = create_screen_parser(**vars(args))
+    logger.info(f"Created a screen parser for {args.game}")
+
+    # 画像入力のためのOBSまたはVideoCapture
+    obs, cap = None, None
     if len(args.obs_pass) > 0:
         logger.info("Use OBS as input")
         obs = OBSController(host="localhost", port=4444, password=args.obs_pass)
-        cap = None
     else:
         logger.info(f"Use video file {args.video_path} as input")
-        obs = None
         cap = cv2.VideoCapture(str(args.video_path))
 
-    def capture() -> Optional[np.ndarray]:
-        if obs:
-            return obs.capture_game_screen()
-        else:
-            for _ in range(100):
-                ret, frame = cap.read()
-            if not ret:
-                return None
-            return frame
+    # ゲーム情報を管理するオブジェクト
+    game_info = GameInfo(status=GameStatus.LOBBY)
 
-    if args.game == "mk8dx":
-        from auto_recorder.MK8DXScreenParser import MK8DXScreenParser
-
-        recorder = MK8DXScreenParser(
-            Path("data/mk8dx/battle"),
-            args.min_my_rate,
-            args.max_my_rate,
-            debug=args.debug,
-        )
-    elif args.game == "mkworld":
-        raise NotImplementedError("MK World is not supported yet")
-    else:
-        raise ValueError(f"Invalid game: {args.game}")
-
-    game_info = GameInfo()
+    # レートの推移表の表示・非表示状態を管理する変数
     chart_visible = True
     chart_appear_time = -10000
+
+    # FPS調整用のタイマー
     since = time.time()
+
     while True:
         # レートの推移表の表示・非表示状態を更新
-        chart_visible = update_chart_visible(chart_visible, chart_appear_time, obs)
+        chart_visible = update_chart_browser(chart_visible, chart_appear_time, obs)
 
         # フレームを取得
-        frame = capture()
+        frame = capture(obs, cap)
         if frame is None:
             logger.info("End of video")
             break
 
-        # フレームをパース
-        next_status, game_info = parse_frame(frame, game_info, recorder, obs)
+        # フレームをパースしてゲーム情報を更新
+        status_changed, game_info = update_game_info(frame, game_info, parser, obs)
 
         if args.debug:
-            logger.info(f"[{next_status}] {game_info}")
+            logger.info(f"{status_changed=}, {game_info=}")
 
         # 状態変化した場合の処理
-        if next_status != GameStatus.NO_CHANGE:
-            logger.info(f"Status: {game_info.status.name} -> {next_status.name}")
-            game_info.status = next_status  # Update to the suggested state
-
+        if status_changed:
+            logger.info(f"Status changed: {game_info.status.name}")
             if game_info.status == GameStatus.LOBBY:
                 # レース終了したので情報保存・推移表表示・リセットする
                 save_game_info(args.out_csv_path, game_info)
-                chart_visible, chart_appear_time = show_chart(obs)
-                game_info = GameInfo()
+                chart_visible, chart_appear_time = show_chart_browser(obs)
+                game_info = GameInfo(status=GameStatus.LOBBY)
 
         # デバッグ用に画面を表示
         if args.imshow:
