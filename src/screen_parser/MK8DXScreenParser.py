@@ -3,9 +3,13 @@ import numpy as np
 from typing import Tuple, Union
 from pathlib import Path
 import mk8dx_digit_ocr
+import cv2
 
 from utils.cv2_util import imread_safe, crop_img, imwrite_safe
-import cv2
+from utils.logger import setup_logger
+
+
+logger = setup_logger(__name__)
 
 race_type_roi = [0.16, 0.85, 0.24, 0.98]
 course_roi = [0.73, 0.87, 0.82, 0.96]
@@ -57,6 +61,10 @@ class MK8DXScreenParser(ScreenParser):
                 tmpl = imread_safe(str(img_path))
                 tmpl = cv2.resize(tmpl, (103, 93))
                 self.race_type_dict.setdefault(d.stem, []).append(tmpl)
+
+        logger.info(
+            f"Loaded {len(self.course_dict)} courses and {len(self.race_type_dict)} race types"
+        )
 
     def detect_match_info(self, img: np.ndarray) -> Tuple[bool, MatchInfo]:
         course, race_type = self._course(img)
