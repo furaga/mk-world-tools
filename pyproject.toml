@@ -3,10 +3,17 @@ name = "mk-world-screenshot"
 version = "0.1.0"
 description = "Takes random screenshots from a Mario Kart World YouTube video."
 dependencies = [
-    "yt-dlp",
-    "opencv-python-headless",
-    "ruff>=0.11.6",
-    "pillow>=10.4.0",
+    "yt-dlp==2025.3.31",
+    "opencv-python-headless==4.11.0.86",
+    "ruff==0.11.6",
+    "pillow==11.2.1",
+    "mk8dx-digit-ocr @ git+https://github.com/furaga/mk8dx-digit-ocr.git@598ab219d76c2d9d773dcad833bfeea605623c69",
+    "numpy==2.2.4",
+    "obs-websocket-py==1.0",
+    "opencv-python==4.11.0.86",
+    "pyyaml==6.0.2",
+    "pydantic==2.11.4",
+    "websocket-client==1.8.0",
 ]
 requires-python = ">=3.8"
 

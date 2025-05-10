@@ -13,6 +13,37 @@
 uv pip sync pyproject.toml
 ```
 
+## Makefile の使い方
+
+`make` コマンドを使用して、各種スクリプトを実行できます。
+
+### 利用可能なターゲット
+
+`Makefile` には以下のターゲットが定義されています。
+
+- `mk8dx-race`
+- `mk8dx-battle`
+- `mkworld-race`
+- `mkworld-survival`
+- `mkworld-battle`
+
+各ターゲットは、対応するゲームの `./scripts/auto_recorder.py` を実行します。
+
+例:
+```bash
+make mk8dx-race
+```
+
+### 追加の引数を渡す
+
+`auto_recorder.py` スクリプトに追加の引数を渡したい場合は、`make` コマンド実行時に `ARGS` 変数を指定します。
+
+例: `--imshow` と `--debug` オプションを付けて実行する場合
+```bash
+make mk8dx-race ARGS="--imshow --debug"
+```
+もし `ARGS` を指定しない場合は、追加の引数なしでスクリプトが実行されます。
+
 ## Tools
 
 ### screenshot_script.py
