@@ -3,24 +3,24 @@ import numpy as np
 from typing import Tuple
 
 
-class Player:
-    def __init__(self, name: str, rate: int):
-        self.name = name
-        self.rate = rate
+from pydantic import BaseModel
 
 
-class MatchInfo:
-    def __init__(self, players: list[Player], course: str, rule: str):
-        self.players = players
-        self.course = course
-        self.rule = rule
+class Player(BaseModel):
+    name: str
+    rate: int
 
 
-class ResultInfo:
-    def __init__(self, players: list[Player], my_rate: int, my_place: int):
-        self.players = players
-        self.my_rate = my_rate
-        self.my_place = my_place
+class MatchInfo(BaseModel):
+    players: list[Player]
+    course: str
+    rule: str
+
+
+class ResultInfo(BaseModel):
+    players: list[Player]
+    my_rate: int
+    my_place: int
 
 
 class AutoRecorder(ABC):

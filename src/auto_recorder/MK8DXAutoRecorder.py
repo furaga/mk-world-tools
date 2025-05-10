@@ -4,7 +4,7 @@ from typing import Tuple, Union
 from pathlib import Path
 import mk8dx_digit_ocr
 
-from utils.cv2_util import imread_safe, crop_img
+from utils.cv2_util import imread_safe, crop_img, imwrite_safe
 import cv2
 
 race_type_roi = [0.16, 0.85, 0.24, 0.98]
@@ -31,11 +31,11 @@ result_rates_rois = [
 
 # テスト用にマリオカート8DXのオートレコーダーを作成
 class MK8DXAutoRecorder(AutoRecorder):
-    def __init__(self, template_images_dir: Union[Path, str]):
+    def __init__(self, template_images_dir: Union[Path, str], debug=False):
         template_images_dir = Path(template_images_dir)
         self.course_dict = {}
         self.race_type_dict = {}
-
+        self.debug = debug
         for d in (template_images_dir / "courses").glob("*"):
             for img_path in d.glob("*.png"):
                 tmpl = imread_safe(str(img_path))
@@ -59,7 +59,9 @@ class MK8DXAutoRecorder(AutoRecorder):
             return False, None
 
         match_info = MatchInfo(
-            players=[Player("", rate) for rate in rates],
+            players=[
+                Player(name=f"player{i}", rate=rate) for i, rate in enumerate(rates)
+            ],
             course=course,
             rule=race_type,
         )
@@ -78,7 +80,7 @@ class MK8DXAutoRecorder(AutoRecorder):
             return False, None
 
         result_info = ResultInfo(
-            players=[Player("", rate) for rate in rates],
+            players=[Player(name="", rate=rate) for rate in rates],
             my_rate=my_rate,
             my_place=place,
         )
@@ -93,11 +95,9 @@ class MK8DXAutoRecorder(AutoRecorder):
             for i, template in enumerate(v):
                 result = cv2.matchTemplate(course_img, template, cv2.TM_CCOEFF_NORMED)
                 _, max_val, _, _ = cv2.minMaxLoc(result)
-                # print("  ", k, max_val)
                 if best_score < max_val:
                     best_score = max_val
                     best_course = k
-        # print(best_course, "| score =", best_score)
         if best_score < threshold:
             return "", ""
 
@@ -145,19 +145,24 @@ class MK8DXAutoRecorder(AutoRecorder):
 
         return rates
 
-    def _rates_in_result(self, img, rule, min_my_rate=0, max_my_rate=99999):
+    def _rates_in_result(self, img, rule, min_my_rate=100, max_my_rate=99999):
         inv_img = 255 - cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         for i, roi in enumerate(result_rates_rois):
             crop = crop_img(inv_img, roi)
             # レースタイプがパックンVSスパイなら自分の色が反転してる
             if rule == "パックンVSスパイ":
+                if self.debug:
+                    imwrite_safe(f"a_crop_{i}.png", crop)
                 ret, my_rate = mk8dx_digit_ocr.digit_ocr.detect_black_digit(
                     crop
                 )  # , verbose=True)
             else:
+                if self.debug:
+                    imwrite_safe(f"crop_{i}.png", crop)
                 ret, my_rate = mk8dx_digit_ocr.digit_ocr.detect_white_digit(
                     crop
                 )  # , verbose=True)
+
             if ret and min_my_rate <= my_rate <= max_my_rate:
                 rates_after = []
                 for roi in result_rates_rois:
