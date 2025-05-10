@@ -1,4 +1,4 @@
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 import numpy as np
 from typing import Tuple
 
@@ -23,7 +23,7 @@ class ResultInfo:
         self.my_place = my_place
 
 
-class AutoRecorder(ABCMeta):
+class AutoRecorder(ABC):
     @abstractmethod
     def detect_match_info(self, img: np.ndarray) -> Tuple[bool, MatchInfo]:
         """
@@ -32,7 +32,9 @@ class AutoRecorder(ABCMeta):
         pass
 
     @abstractmethod
-    def detect_result(self, img: np.ndarray) -> Tuple[bool, ResultInfo]:
+    def detect_result(
+        self, img: np.ndarray, match_info: MatchInfo
+    ) -> Tuple[bool, ResultInfo]:
         """
         レース結果画面を検出する
         """

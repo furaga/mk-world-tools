@@ -1,6 +1,6 @@
 from .AutoRecorder import AutoRecorder, MatchInfo, ResultInfo, Player
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Union
 from pathlib import Path
 import mk8dx_digit_ocr
 
@@ -31,28 +31,29 @@ result_rates_rois = [
 
 # テスト用にマリオカート8DXのオートレコーダーを作成
 class MK8DXAutoRecorder(AutoRecorder):
-    def __init__(self):
+    def __init__(self, template_images_dir: Union[Path, str]):
+        template_images_dir = Path(template_images_dir)
         self.course_dict = {}
         self.race_type_dict = {}
 
-        for d in Path("data/battle_courses").glob("*"):
+        for d in (template_images_dir / "courses").glob("*"):
             for img_path in d.glob("*.png"):
                 tmpl = imread_safe(str(img_path))
                 tmpl = cv2.resize(tmpl, (173, 97))
                 self.course_dict.setdefault(d.stem, []).append(tmpl)
 
-        for d in Path("data/battle_race_type").glob("*"):
+        for d in (template_images_dir / "rules").glob("*"):
             for img_path in d.glob("*.png"):
                 tmpl = imread_safe(str(img_path))
                 tmpl = cv2.resize(tmpl, (103, 93))
                 self.race_type_dict.setdefault(d.stem, []).append(tmpl)
 
     def detect_match_info(self, img: np.ndarray) -> Tuple[bool, MatchInfo]:
-        course, race_type = self.detect_course(img)
+        course, race_type = self._course(img)
         if course == "" or race_type == "":
             return False, None
 
-        rates = self.detect_rates_in_match_info(img)
+        rates = self._rates_in_match_info(img)
         n_valid = len([x for x in rates if x > 0])
         if n_valid < 3:
             return False, None
@@ -68,7 +69,7 @@ class MK8DXAutoRecorder(AutoRecorder):
     def detect_result(
         self, img: np.ndarray, match_info: MatchInfo
     ) -> Tuple[bool, ResultInfo]:
-        ret, my_rate, place, rates = self.detect_rates_after(img, match_info.rule)
+        ret, my_rate, place, rates = self._rates_in_result(img, match_info.rule)
         if not ret:
             return False, None
 
@@ -83,7 +84,7 @@ class MK8DXAutoRecorder(AutoRecorder):
         )
         return True, result_info
 
-    def detect_course(self, img, threshold=0.8):
+    def _course(self, img, threshold=0.8):
         best_score = 0
         best_course = ""
         course_img = crop_img(img, course_roi)
@@ -119,7 +120,32 @@ class MK8DXAutoRecorder(AutoRecorder):
 
         return best_course, best_race_type
 
-    def detect_rates_after(self, img, rule, min_my_rate=0, max_my_rate=99999):
+    def _rates_in_match_info(self, img):
+        players_roi = players_roi_base
+
+        players_img = crop_img(img, players_roi)
+
+        players = []
+        for x in range(2):
+            for y in range(6):
+                players.append(
+                    crop_img(players_img, [x / 2, y / 6, (x + 1) / 2, (y + 1) / 6])
+                )
+
+        rates = []
+        for i, p in enumerate(players):
+            rate_img = crop_img(p, [0.75, 0.5, 0.995, 0.995])
+            rate_img = cv2.cvtColor(rate_img, cv2.COLOR_BGR2GRAY)
+            ret, rate = mk8dx_digit_ocr.detect_digit(rate_img)
+            if not ret:
+                rate = 0
+            if not (500 <= rate <= 99999):
+                rate = 0
+            rates.append(rate)
+
+        return rates
+
+    def _rates_in_result(self, img, rule, min_my_rate=0, max_my_rate=99999):
         inv_img = 255 - cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         for i, roi in enumerate(result_rates_rois):
             crop = crop_img(inv_img, roi)
