@@ -185,20 +185,19 @@ def update_chart_visible(
 def main(args):
     logger.info("BATTLE MODE")
 
-    obs = None
-    cap = None
+    if len(args.obs_pass) > 0:
+        logger.info("Use OBS as input")
+        obs = OBSController(host="localhost", port=4444, password=args.obs_pass)
+        cap = None
+    else:
+        logger.info(f"Use video file {args.video_path} as input")
+        obs = None
+        cap = cv2.VideoCapture(str(args.video_path))
 
     def capture() -> Optional[np.ndarray]:
-        if len(args.obs_pass) > 0:
-            if obs is None:
-                logger.info("Use OBS as input")
-                obs = OBSController(host="localhost", port=4444, password=args.obs_pass)
+        if obs:
             return obs.capture_game_screen()
         else:
-            if cap is None:
-                logger.info(f"Use video file {args.video_path} as input")
-                cap = cv2.VideoCapture(str(args.video_path))
-                obs = None
             ret, frame = cap.read()
             if not ret:
                 return None
