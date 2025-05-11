@@ -1,10 +1,9 @@
 [project]
 name = "mk-world-tools"
 version = "0.1.0"
-description = "Takes random screenshots from a Mario Kart World YouTube video."
+description = "Tools for Mario Kart World."
 dependencies = [
     "yt-dlp==2025.3.31",
-    "opencv-python-headless==4.11.0.86",
     "ruff==0.11.6",
     "pillow==11.2.1",
     "mk8dx-digit-ocr @ git+https://github.com/furaga/mk8dx-digit-ocr.git@598ab219d76c2d9d773dcad833bfeea605623c69",

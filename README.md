@@ -7,6 +7,13 @@
 - Python 3.12.5
 - uv 0.6.14 (a4cec56dc 2025-04-09)
 
+# Setup
+
+```bash
+uv sync --extra test
+```
+
+テストを実行しないなら `--extra test` は不要です
 
 ## Quick Start
 
