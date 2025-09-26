@@ -198,30 +198,15 @@ class MKWorldScreenParser(ScreenParser):
         # X座標でソート（左から右へ）
         detections.sort(key=lambda x: x['x'])
 
-        # 重複した検出を除去（同じ位置に複数の数字が検出された場合）
+        # 重複した検出を除去（同じ位置に複数の数字が検出された場合、信頼度が高い方を採用）
         filtered_detections = []
         for detection in detections:
-            # 既存の検出と位置が近い場合は、より高い信頼度のものを採用
             is_duplicate = False
             for i, existing in enumerate(filtered_detections):
                 if abs(detection['x'] - existing['x']) < 5:  # 5ピクセル以内なら重複とみなす
-                    # 特別ケース: 9と0の混同を処理
-                    if (detection['digit'] == '0' and existing['digit'] == '9') or \
-                       (detection['digit'] == '9' and existing['digit'] == '0'):
-                        # 9と0が同じ位置で競合している場合、信頼度差が小さければ9を優先
-                        if detection['digit'] == '9':
-                            filtered_detections[i] = detection
-                        elif existing['digit'] == '9':
-                            # 既存が9なら保持（何もしない）
-                            pass
-                        else:
-                            # 通常の信頼度比較
-                            if detection['confidence'] > existing['confidence']:
-                                filtered_detections[i] = detection
-                    else:
-                        # 通常の重複処理
-                        if detection['confidence'] > existing['confidence']:
-                            filtered_detections[i] = detection
+                    # より高い信頼度のものを採用
+                    if detection['confidence'] > existing['confidence']:
+                        filtered_detections[i] = detection
                     is_duplicate = True
                     break
 
@@ -279,119 +264,80 @@ class MKWorldScreenParser(ScreenParser):
 
         return None, None
 
-    def _detect_my_rate_from_yellow_highlight(self, img: np.ndarray):
+    def _is_yellow_background(self, region: np.ndarray) -> bool:
         """
-        黄色のハイライト部分から自分のレートを検出する（バックアップ方法）
-        Returns: (my_rate, my_place)
+        領域の背景が黄色かどうかを簡易判定
         """
-        # 検索領域を右側のプレイヤーリスト部分に限定
-        # 画像の右半分のみを対象とする
-        h, w = img.shape[:2]
-        search_region = img[:, w//2:]  # 右半分のみ
-
-        # HSVカラー空間に変換
-        hsv = cv2.cvtColor(search_region, cv2.COLOR_BGR2HSV)
-
-        # より厳密な黄色/オレンジ色の範囲を定義
-        # 実際の1位ハイライトの色に焦点を当てる
-        lower_yellow = np.array([15, 120, 150])  # より厳密な黄色
+        hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+        lower_yellow = np.array([15, 100, 100])
         upper_yellow = np.array([35, 255, 255])
-
-        # 黄色のマスクを作成
         yellow_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        # モルフォロジー処理でノイズを除去
-        kernel = np.ones((3, 3), np.uint8)
-        yellow_mask = cv2.morphologyEx(yellow_mask, cv2.MORPH_CLOSE, kernel)
-        yellow_mask = cv2.morphologyEx(yellow_mask, cv2.MORPH_OPEN, kernel)
+        # 黄色ピクセルの割合が30%以上なら黄色背景
+        yellow_ratio = np.count_nonzero(yellow_mask) / yellow_mask.size
+        return yellow_ratio > 0.3
 
-        # 輪郭を検出
-        contours, _ = cv2.findContours(yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    def _extract_white_digits(self, region: np.ndarray) -> np.ndarray:
+        """
+        白色の数字部分を抽出して二値化
+        """
+        # グレースケール化
+        gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
 
-        if not contours:
-            return None, None
+        # 白色領域を抽出（閾値200以上を白とする）
+        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
 
-        # 適切な黄色領域を見つける（面積と位置を考慮）
-        valid_contours = []
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area < 1000:  # 面積が小さすぎる場合は除外
-                continue
+        return binary
 
-            # バウンディングボックスを取得
-            temp_x, temp_y, temp_w, temp_h = cv2.boundingRect(contour)
+    def _detect_my_rate_from_yellow_highlight(self, img: np.ndarray):
+        """
+        固定座標で全プレイヤー行をチェックし、黄色背景の行からレートを検出
+        Returns: (my_rate, my_place)
+        """
+        h, w = img.shape[:2]
+        scale_x = w / 1920.0
+        scale_y = h / 1080.0
 
-            # プレイヤー行らしい形状（横長）であることを確認
-            aspect_ratio = temp_w / temp_h if temp_h > 0 else 0
-            if aspect_ratio < 3:  # 横幅が高さの3倍以上でない場合は除外
-                continue
-
-            valid_contours.append((contour, area, temp_y))
-
-        if not valid_contours:
-            return None, None
-
-        # 面積が大きく、かつ上位にある輪郭を優先選択
-        # Y座標が小さいほど（上にあるほど）高得点
-        def score_contour(contour_info):
-            contour, area, y = contour_info
-            # 面積スコア（正規化）+ 位置スコア（Y座標が小さいほど高得点）
-            area_score = area / 10000  # 面積を正規化
-            position_score = (search_region.shape[0] - y) / search_region.shape[0] * 100  # 上にあるほど高得点
-            return area_score + position_score
-
-        best_contour_info = max(valid_contours, key=score_contour)
-        largest_contour = best_contour_info[0]
-        contour_area = best_contour_info[1]
-
-        # バウンディングボックスを取得
-        x, y, w, h = cv2.boundingRect(largest_contour)
-
-        # 座標を元の画像座標系に戻す（右半分を検索していたため）
-        original_w = img.shape[1]
-        x = x + original_w // 2
-
-        # レート部分の固定座標を使用（1920x1080基準）
-        # レート数字部分のみを抽出（装飾を除外）
-        h_img, w_img = img.shape[:2]
-        scale_x = w_img / 1920.0
-        rate_x1 = int(1730 * scale_x)  # 装飾を除外しつつ数字全体を含める
+        # レート表示領域の固定座標（1920x1080基準）
+        rate_x1 = int(1730 * scale_x)
         rate_x2 = int(1865 * scale_x)
 
-        # Y座標は検出された黄色領域のものを使用
-        rate_region = img[y:y+h, rate_x1:rate_x2]
+        # 全13行をチェック
+        for i in range(13):
+            y1 = int((40 + 70 * i) * scale_y)
+            y2 = int((110 + 70 * i) * scale_y)
 
-        # この領域から数字を検出
-        detected_rate, confidence = self._detect_digits_in_image(rate_region, threshold=0.6)
+            if y2 >= h or rate_x2 >= w:
+                continue
 
-        if self.debug:
-            # デバッグ用に画像を保存
-            # yellow_maskは検索領域のサイズなので、元画像サイズに拡張
-            full_yellow_mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
-            full_yellow_mask[:, original_w//2:] = yellow_mask
-            imwrite_safe("debug_yellow_mask.png", full_yellow_mask)
-            imwrite_safe("debug_rate_region.png", rate_region)
+            # プレイヤー行全体を取得（黄色判定用）
+            player_row = img[y1:y2, w//2:]  # 右半分のみ
 
-            # 元画像に検出領域を描画
-            debug_img = img.copy()
-            cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            # 黄色背景かチェック
+            if not self._is_yellow_background(player_row):
+                continue
 
-            # 輪郭面積をテキストで表示
-            cv2.putText(debug_img, f"Area: {contour_area}", (x, y-10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            # レート領域を抽出
+            rate_region = img[y1:y2, rate_x1:rate_x2]
 
-            imwrite_safe("debug_detection.png", debug_img)
+            if self.debug:
+                imwrite_safe("debug_rate_region.png", rate_region)
 
-        if detected_rate is not None and confidence > 0.4:
-            # プレースを推定（Y座標から行数を計算）
-            # 各行: y1=40+70i, y2=110+70i (i=0,1,2,...)
-            row_height = 70
-            first_row_y = 40
-            y_center = y + h/2
-            estimated_place = int((y_center - first_row_y) / row_height) + 1
-            estimated_place = max(1, min(13, estimated_place))  # 1-13位の範囲
+            # カラー画像でテンプレートマッチング
+            detected_rate, confidence = self._detect_digits_in_image(
+                rate_region, threshold=0.6
+            )
 
-            return detected_rate, estimated_place
+            # 自分のレート範囲内なら返す
+            if detected_rate and self.min_my_rate <= detected_rate <= self.max_my_rate:
+                if self.debug:
+                    debug_img = img.copy()
+                    cv2.rectangle(debug_img, (rate_x1, y1), (rate_x2, y2), (0, 255, 0), 2)
+                    cv2.putText(debug_img, f"Rate: {detected_rate}, Place: {i+1}",
+                               (rate_x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    imwrite_safe("debug_detection.png", debug_img)
+
+                return detected_rate, i + 1
 
         return None, None
 
