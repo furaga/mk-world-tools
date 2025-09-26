@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python test:*)",
+      "Bash(python:*)",
+      "Bash(cp:*)",
+      "Bash(uv run:*)",
+      "Bash(findstr:*)",
+      "Bash(del test_mkworld_parser.py debug_*.png)"
+    ],
+    "deny": []
+  }
+}
