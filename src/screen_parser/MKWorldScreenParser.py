@@ -203,7 +203,7 @@ class MKWorldScreenParser(ScreenParser):
         for detection in detections:
             is_duplicate = False
             for i, existing in enumerate(filtered_detections):
-                if abs(detection['x'] - existing['x']) < 5:  # 5ピクセル以内なら重複とみなす
+                if abs(detection['x'] - existing['x']) < 8:  # 8ピクセル以内なら重複とみなす
                     # より高い信頼度のものを採用
                     if detection['confidence'] > existing['confidence']:
                         filtered_detections[i] = detection
@@ -323,9 +323,9 @@ class MKWorldScreenParser(ScreenParser):
             if self.debug:
                 imwrite_safe("debug_rate_region.png", rate_region)
 
-            # カラー画像でテンプレートマッチング
+            # カラー画像でテンプレートマッチング（閾値0.65で誤検出を抑制）
             detected_rate, confidence = self._detect_digits_in_image(
-                rate_region, threshold=0.6
+                rate_region, threshold=0.65
             )
 
             # 自分のレート範囲内なら返す
