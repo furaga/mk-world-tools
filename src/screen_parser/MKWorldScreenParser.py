@@ -458,13 +458,13 @@ class MKWorldScreenParser(ScreenParser):
                     scale_y=scale_y,
                 )
 
-                # 検出結果をデバッグ出力
-                if detected_rate is not None:
-                    print(f"Detected rate: {detected_rate}, Confidence: {confidence}")
-                    # 切り出した画像を保存
-                    imwrite_safe(
-                        f"debug_rate_region_{i}_{detected_rate}.png", rate_region
-                    )
+                # # 検出結果をデバッグ出力
+                # if detected_rate is not None:
+                #     print(f"Detected rate: {detected_rate}, Confidence: {confidence}")
+                #     # 切り出した画像を保存
+                #     imwrite_safe(
+                #         f"debug_rate_region_{i}_{detected_rate}.png", rate_region
+                #     )
 
                 if detected_rate is not None and 1000 <= detected_rate <= 99999:
                     rates.append(detected_rate)

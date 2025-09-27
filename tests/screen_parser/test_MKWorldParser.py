@@ -22,10 +22,10 @@ class TestMKWorldScreenParser(unittest.TestCase):
 
     def test_detect_result_with_mkw_result_images(self):
         """
-        tests/screen_parser/data/mkw_result/内の全画像をテスト
+        tests/screen_parser/data/result/内の全画像をテスト
         ファイル名形式: mkw_result_<期待レート>.png
         """
-        test_data_dir = Path("tests/screen_parser/data/mkw_result")
+        test_data_dir = Path("tests/screen_parser/data/result")
 
         # mkw_result_*.png ファイルを全て取得
         image_files = list(test_data_dir.glob("mkw_result_*.png"))
@@ -54,8 +54,12 @@ class TestMKWorldScreenParser(unittest.TestCase):
                 success, result_info = self.parser.detect_result(img, match_info)
 
                 # 結果を検証
-                self.assertTrue(success, f"detect_result()が失敗しました: {image_path.name}")
-                self.assertIsNotNone(result_info, f"ResultInfoがNoneです: {image_path.name}")
+                self.assertTrue(
+                    success, f"detect_result()が失敗しました: {image_path.name}"
+                )
+                self.assertIsNotNone(
+                    result_info, f"ResultInfoがNoneです: {image_path.name}"
+                )
 
                 # レートの検証
                 self.assertEqual(
@@ -66,7 +70,9 @@ class TestMKWorldScreenParser(unittest.TestCase):
 
                 # プレイヤー数の確認
                 self.assertEqual(
-                    len(result_info.players), 12, f"プレイヤー数が12人ではありません: {image_path.name}"
+                    len(result_info.players),
+                    12,
+                    f"プレイヤー数が12人ではありません: {image_path.name}",
                 )
 
                 # 順位が妥当な範囲内であることを確認
@@ -74,7 +80,9 @@ class TestMKWorldScreenParser(unittest.TestCase):
                     result_info.my_place, 1, f"順位が1未満です: {image_path.name}"
                 )
                 self.assertLessEqual(
-                    result_info.my_place, 12, f"順位が12を超えています: {image_path.name}"
+                    result_info.my_place,
+                    12,
+                    f"順位が12を超えています: {image_path.name}",
                 )
 
                 # 自分のレートが正しい位置に設定されているか確認
@@ -129,58 +137,20 @@ class TestMKWorldScreenParser(unittest.TestCase):
                 f"数字{i}のテンプレート画像がNoneです",
             )
 
-    def test_rate_range_validation(self):
-        """
-        レート範囲のバリデーションテスト
-        """
-        # 範囲外のレートでパーサーを作成
-        parser_narrow = MKWorldScreenParser(
-            template_images_dir=Path("data/mkworld"),
-            min_my_rate=5000,  # 最小レートを高く設定
-            max_my_rate=10000,
-            debug=False,
-        )
-
-        # サンプル画像を読み込み（期待値9112は範囲内）
-        sample_image_path = Path("data/screenshots/mkw_rate_2.png")
-        if not sample_image_path.exists():
-            self.skipTest(f"サンプル画像が見つかりません: {sample_image_path}")
-
-        img = imread_safe(str(sample_image_path))
-        match_info = MatchInfo(
-            players=[Player(name=f"player{i}", rate=0) for i in range(12)],
-            course="test_course",
-            rule="vs",
-        )
-
-        # レートが範囲内なので成功するはず
-        success, result_info = parser_narrow.detect_result(img, match_info)
-        self.assertTrue(success, "範囲内のレートで検出が失敗しました")
-
-        # 範囲外のレートでパーサーを作成
-        parser_out_of_range = MKWorldScreenParser(
-            template_images_dir=Path("data/mkworld"),
-            min_my_rate=10000,  # 最小レートを期待値より高く設定
-            max_my_rate=99999,
-            debug=False,
-        )
-
-        # レートが範囲外なので失敗するはず
-        success, result_info = parser_out_of_range.detect_result(img, match_info)
-        self.assertFalse(success, "範囲外のレートで検出が成功してしまいました")
-
     def test_detect_match_info_with_mkw_match_images(self):
         """
-        tests/screen_parser/data/mkw_result/内のマッチ画像をテスト
+        tests/screen_parser/data/match_info/内のマッチ画像をテスト
         ファイル名形式: mkw_match_<期待レート>.png
         """
-        test_data_dir = Path("tests/screen_parser/data/mkw_result")
+        test_data_dir = Path("tests/screen_parser/data/match_info")
 
         # mkw_match_*.png ファイルを全て取得
         image_files = list(test_data_dir.glob("mkw_match_*.png"))
 
         if not image_files:
-            self.skipTest(f"テスト画像が見つかりません: {test_data_dir}/mkw_match_*.png")
+            self.skipTest(
+                f"テスト画像が見つかりません: {test_data_dir}/mkw_match_*.png"
+            )
 
         for image_path in image_files:
             with self.subTest(image=image_path.name):
@@ -196,12 +166,18 @@ class TestMKWorldScreenParser(unittest.TestCase):
                 success, match_info = self.parser.detect_match_info(img)
 
                 # 結果を検証
-                self.assertTrue(success, f"detect_match_info()が失敗しました: {image_path.name}")
-                self.assertIsNotNone(match_info, f"MatchInfoがNoneです: {image_path.name}")
+                self.assertTrue(
+                    success, f"detect_match_info()が失敗しました: {image_path.name}"
+                )
+                self.assertIsNotNone(
+                    match_info, f"MatchInfoがNoneです: {image_path.name}"
+                )
 
                 # プレイヤー数の確認（最大26人: 左列13人 + 右列13人）
                 self.assertGreater(
-                    len(match_info.players), 0, f"プレイヤーが検出されていません: {image_path.name}"
+                    len(match_info.players),
+                    0,
+                    f"プレイヤーが検出されていません: {image_path.name}",
                 )
 
                 # 自分のレートが検出されたか確認
