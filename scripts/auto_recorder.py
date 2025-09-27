@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from typing import List, Optional, Any, Dict
+from typing import List, Optional
 from pydantic import BaseModel
 from enum import Enum, auto
 
@@ -47,6 +47,7 @@ class GameInfo(BaseModel):
     status: GameStatus = GameStatus.NO_CHANGE
     result_info: Optional[ResultInfo] = None
     match_info: Optional[MatchInfo] = None
+    consecutive_fail_count: int = 0  # 連続でret=Falseになった回数
 
     @property
     def course(self) -> str:
@@ -154,6 +155,7 @@ def update_game_info(
         ret, match_info = parser.detect_match_info(img)
         if ret and update_match_info(match_info, game_info, obs):
             game_info.status = GameStatus.RACE
+            game_info.consecutive_fail_count = 0  # 状態変更時にカウンターをリセット
             return True, game_info
         else:
             return False, game_info
@@ -163,6 +165,7 @@ def update_game_info(
         ret, result_info = parser.detect_result(img, game_info.match_info)
         if ret and update_results(result_info, game_info, obs):
             game_info.status = GameStatus.RESULT
+            game_info.consecutive_fail_count = 0  # 状態変更時にカウンターをリセット
             return True, game_info
         else:
             return False, game_info
@@ -171,10 +174,15 @@ def update_game_info(
     if game_info.status == GameStatus.RESULT:
         ret, result_info = parser.detect_result(img, game_info.match_info)
         if ret and update_results(result_info, game_info, obs):
+            game_info.consecutive_fail_count = 0  # 成功したらカウンターをリセット
             return False, game_info
-        else:
-            game_info.status = GameStatus.LOBBY
-            return True, game_info
+        if not ret:
+            # 8フレーム以上連続してret=FalseならLOBBYに切り替え
+            game_info.consecutive_fail_count += 1
+            if game_info.consecutive_fail_count >= 6:
+                game_info.status = GameStatus.LOBBY
+                game_info.consecutive_fail_count = 0  # カウンターをリセット
+                return True, game_info
 
     return False, game_info
 
@@ -321,7 +329,7 @@ def main(args):
                 # レース終了したので情報保存・推移表表示・リセットする
                 save_game_info(args.out_csv_path, game_info)
                 chart_visible, chart_appear_time = show_chart_browser(obs)
-                game_info = GameInfo(status=GameStatus.LOBBY)
+                game_info = GameInfo(status=GameStatus.LOBBY, consecutive_fail_count=0)
 
         # デバッグ用に画面を表示
         if args.imshow:
