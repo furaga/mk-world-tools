@@ -1,5 +1,5 @@
 GAMES = mk8dx-race mk8dx-battle mkworld-race mkworld-survival mkworld-battle
-ARGS ?= "" # ARGSが未定義の場合、空文字列をデフォルト値として設定
+ARGS ?=  # ARGSが未定義の場合、空文字列をデフォルト値として設定
 
 define run_recorder
 $(1):
