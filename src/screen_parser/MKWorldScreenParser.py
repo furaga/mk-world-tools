@@ -119,7 +119,6 @@ class MKWorldScreenParser(ScreenParser):
     def detect_match_info(self, img: np.ndarray) -> Tuple[bool, MatchInfo]:
         course, race_type = self._course(img)
         rates, my_rate = self._rates_in_match_info(img)
-        print(f"my_rate: {my_rate}")
 
         n_valid = len([x for x in rates if x > 0])
         if n_valid < 1:
