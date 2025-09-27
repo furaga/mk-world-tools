@@ -419,7 +419,11 @@ class MKWorldScreenParser(ScreenParser):
             )
 
             # 順位をテンプレートマッチングで検出（二値化版）
-            detected_place = self._detect_place(place_region, threshold=0.4)
+            if is_my_rate:
+                # 重いので自分のレートのみ検出
+                detected_place = self._detect_place(place_region, threshold=0.4)
+            else:
+                detected_place = None
 
             # レートが検出された場合のみ追加（順位が検出できない場合はデフォルト値を使用）
             if detected_rate:
