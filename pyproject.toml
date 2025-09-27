@@ -13,6 +13,9 @@ dependencies = [
     "pyyaml==6.0.2",
     "pydantic==2.11.4",
     "websocket-client==1.8.0",
+    "dash>=3.2.0",
+    "dash-core-components>=2.0.0",
+    "dash-html-components>=2.0.0",
 ]
 requires-python = ">=3.10"
 
