@@ -169,6 +169,82 @@ class TestMKWorldScreenParser(unittest.TestCase):
         success, result_info = parser_out_of_range.detect_result(img, match_info)
         self.assertFalse(success, "範囲外のレートで検出が成功してしまいました")
 
+    def test_detect_match_info_with_mkw_match_images(self):
+        """
+        tests/screen_parser/data/mkw_result/内のマッチ画像をテスト
+        ファイル名形式: mkw_match_<期待レート>.png
+        """
+        test_data_dir = Path("tests/screen_parser/data/mkw_result")
+
+        # mkw_match_*.png ファイルを全て取得
+        image_files = list(test_data_dir.glob("mkw_match_*.png"))
+
+        if not image_files:
+            self.skipTest(f"テスト画像が見つかりません: {test_data_dir}/mkw_match_*.png")
+
+        for image_path in image_files:
+            with self.subTest(image=image_path.name):
+                # ファイル名から期待レート（自分のレート）を抽出
+                # mkw_match_9087.png -> 9087
+                expected_my_rate = int(image_path.stem.split("_")[-1])
+
+                # 画像を読み込み
+                img = imread_safe(str(image_path))
+                self.assertIsNotNone(img, f"画像の読み込みに失敗しました: {image_path}")
+
+                # detect_match_info()を実行
+                success, match_info = self.parser.detect_match_info(img)
+
+                # 結果を検証
+                self.assertTrue(success, f"detect_match_info()が失敗しました: {image_path.name}")
+                self.assertIsNotNone(match_info, f"MatchInfoがNoneです: {image_path.name}")
+
+                # プレイヤー数の確認（最大26人: 左列13人 + 右列13人）
+                self.assertGreater(
+                    len(match_info.players), 0, f"プレイヤーが検出されていません: {image_path.name}"
+                )
+
+                # 自分のレートが検出されたか確認
+                my_player = None
+                for player in match_info.players:
+                    if player.name == str(expected_my_rate):
+                        my_player = player
+                        break
+
+                self.assertIsNotNone(
+                    my_player,
+                    f"自分のレート（{expected_my_rate}）がプレイヤー名として設定されていません: {image_path.name}",
+                )
+
+                # 自分のレートが正しく設定されているか確認
+                self.assertEqual(
+                    my_player.rate,
+                    expected_my_rate,
+                    f"自分のレートが期待値と異なります: 期待値={expected_my_rate}, 実際={my_player.rate}",
+                )
+
+                # 他のプレイヤーのレートも検出されているか確認（少なくとも3人以上）
+                valid_rates = [p.rate for p in match_info.players if p.rate > 0]
+                self.assertGreaterEqual(
+                    len(valid_rates),
+                    3,
+                    f"有効なレートが3つ未満です: {image_path.name}",
+                )
+
+    def test_detect_match_info_with_invalid_image(self):
+        """
+        無効な画像でのdetect_match_info()のテスト
+        """
+        # 黒い画像を作成（レートが検出されないはず）
+        black_img = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+        # detect_match_info()を実行
+        success, match_info = self.parser.detect_match_info(black_img)
+
+        # レート検出に失敗することを確認（有効なレートが3つ未満）
+        self.assertFalse(success, "黒い画像でレート検出が成功してしまいました")
+        self.assertIsNone(match_info, "失敗時のMatchInfoがNoneではありません")
+
 
 if __name__ == "__main__":
     unittest.main()

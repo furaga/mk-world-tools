@@ -82,27 +82,58 @@ class MKWorldScreenParser(ScreenParser):
                 if digit_templates:
                     self.digit_templates[str(i)] = digit_templates
 
+        # マッチ画面用の数字テンプレート画像を読み込む
+        self.match_digit_templates = {}
+        match_digits_dir = template_images_dir / "match_digits"
+        if match_digits_dir.exists():
+            for i in range(10):
+                digit_templates = []
+                # 基本テンプレート（N.png）
+                digit_path = match_digits_dir / f"{i}.png"
+                if digit_path.exists():
+                    template = imread_safe(str(digit_path))
+                    if template is not None:
+                        digit_templates.append(template)
+
+                # バリエーションテンプレート（N_*.png）
+                for variant_path in match_digits_dir.glob(f"{i}_*.png"):
+                    template = imread_safe(str(variant_path))
+                    if template is not None:
+                        digit_templates.append(template)
+
+                if digit_templates:
+                    self.match_digit_templates[str(i)] = digit_templates
+
         # テンプレート画像の総数を計算
-        total_digit_templates = sum(len(templates) for templates in self.digit_templates.values())
+        total_digit_templates = sum(
+            len(templates) for templates in self.digit_templates.values()
+        )
+        total_match_digit_templates = sum(
+            len(templates) for templates in self.match_digit_templates.values()
+        )
 
         logger.info(
-            f"Loaded {len(self.course_dict)} courses, {len(self.race_type_dict)} race types, and {total_digit_templates} digit templates ({len(self.digit_templates)} digits)"
+            f"Loaded {len(self.course_dict)} courses, {len(self.race_type_dict)} race types, {total_digit_templates} result digit templates ({len(self.digit_templates)} digits), and {total_match_digit_templates} match digit templates ({len(self.match_digit_templates)} digits)"
         )
 
     def detect_match_info(self, img: np.ndarray) -> Tuple[bool, MatchInfo]:
         course, race_type = self._course(img)
-        if course == "" or race_type == "":
-            return False, None
-
-        rates = self._rates_in_match_info(img)
+        rates, my_rate = self._rates_in_match_info(img)
         n_valid = len([x for x in rates if x > 0])
         if n_valid < 3:
             return False, None
 
+        players = []
+        for i, rate in enumerate(rates):
+            if rate == my_rate and my_rate is not None:
+                # 自分のプレイヤー名は自分のレート
+                players.append(Player(name=str(my_rate), rate=rate))
+            else:
+                # 他のプレイヤーは空文字
+                players.append(Player(name="", rate=rate))
+
         match_info = MatchInfo(
-            players=[
-                Player(name=f"player{i}", rate=rate) for i, rate in enumerate(rates)
-            ],
+            players=players,
             course=course,
             rule=race_type,
         )
@@ -169,43 +200,57 @@ class MKWorldScreenParser(ScreenParser):
 
         return best_course, best_race_type
 
-    def _detect_digits_in_image(self, img: np.ndarray, threshold=0.4):
+    def _detect_digits_in_image(self, img: np.ndarray, threshold=0.4, use_match_templates=False):
         """
         画像内の数字をテンプレートマッチングで検出する
         Returns: (detected_rate, confidence)
         """
         detections = []
 
-        for digit, templates in self.digit_templates.items():
+        # テンプレート選択（match_templatesが空の場合はresult_templatesを使用）
+        if use_match_templates and self.match_digit_templates:
+            digit_templates = self.match_digit_templates
+        else:
+            digit_templates = self.digit_templates
+
+        for digit, templates in digit_templates.items():
             # 複数のテンプレートに対してマッチング
             for template in templates:
+                # テンプレートが画像より大きい場合はスキップ
+                if template.shape[0] > img.shape[0] or template.shape[1] > img.shape[1]:
+                    continue
+
                 # テンプレートマッチング
                 result = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
                 locations = np.where(result >= threshold)
 
                 for pt in zip(*locations[::-1]):  # (x, y)の順
                     confidence = result[pt[1], pt[0]]
-                    detections.append({
-                        'digit': digit,
-                        'x': pt[0],
-                        'y': pt[1],
-                        'confidence': confidence
-                    })
+                    detections.append(
+                        {
+                            "digit": digit,
+                            "x": pt[0],
+                            "y": pt[1],
+                            "confidence": confidence,
+                        }
+                    )
 
         if not detections:
             return None, 0.0
 
         # X座標でソート（左から右へ）
-        detections.sort(key=lambda x: x['x'])
+        detections.sort(key=lambda x: x["x"])
 
         # 重複した検出を除去（同じ位置に複数の数字が検出された場合、信頼度が高い方を採用）
         filtered_detections = []
         for detection in detections:
             is_duplicate = False
             for i, existing in enumerate(filtered_detections):
-                if abs(detection['x'] - existing['x']) < 8:  # 8ピクセル以内なら重複とみなす
+                if (
+                    abs(detection["x"] - existing["x"]) < 8
+                ):  # 8ピクセル以内なら重複とみなす
                     # より高い信頼度のものを採用
-                    if detection['confidence'] > existing['confidence']:
+                    if detection["confidence"] > existing["confidence"]:
                         filtered_detections[i] = detection
                     is_duplicate = True
                     break
@@ -214,11 +259,13 @@ class MKWorldScreenParser(ScreenParser):
                 filtered_detections.append(detection)
 
         # 再度X座標でソート
-        filtered_detections.sort(key=lambda x: x['x'])
+        filtered_detections.sort(key=lambda x: x["x"])
 
         # 数字文字列を構築
-        digit_string = ''.join([d['digit'] for d in filtered_detections])
-        avg_confidence = sum([d['confidence'] for d in filtered_detections]) / len(filtered_detections)
+        digit_string = "".join([d["digit"] for d in filtered_detections])
+        avg_confidence = sum([d["confidence"] for d in filtered_detections]) / len(
+            filtered_detections
+        )
 
         if digit_string.isdigit() and 4 <= len(digit_string) <= 5:
             return int(digit_string), avg_confidence
@@ -257,9 +304,14 @@ class MKWorldScreenParser(ScreenParser):
             rate_region = player_row[:, -rate_width:]
 
             # この領域で数字認識を実行
-            detected_rate, confidence = self._detect_digits_in_image(rate_region, threshold=0.6)
+            detected_rate, confidence = self._detect_digits_in_image(
+                rate_region, threshold=0.6
+            )
 
-            if detected_rate is not None and self.min_my_rate <= detected_rate <= self.max_my_rate:
+            if (
+                detected_rate is not None
+                and self.min_my_rate <= detected_rate <= self.max_my_rate
+            ):
                 return detected_rate, i + 1
 
         return None, None
@@ -311,7 +363,7 @@ class MKWorldScreenParser(ScreenParser):
                 continue
 
             # プレイヤー行全体を取得（黄色判定用）
-            player_row = img[y1:y2, w//2:]  # 右半分のみ
+            player_row = img[y1:y2, w // 2 :]  # 右半分のみ
 
             # 黄色背景かチェック
             if not self._is_yellow_background(player_row):
@@ -332,99 +384,82 @@ class MKWorldScreenParser(ScreenParser):
             if detected_rate and self.min_my_rate <= detected_rate <= self.max_my_rate:
                 if self.debug:
                     debug_img = img.copy()
-                    cv2.rectangle(debug_img, (rate_x1, y1), (rate_x2, y2), (0, 255, 0), 2)
-                    cv2.putText(debug_img, f"Rate: {detected_rate}, Place: {i+1}",
-                               (rate_x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    cv2.rectangle(
+                        debug_img, (rate_x1, y1), (rate_x2, y2), (0, 255, 0), 2
+                    )
+                    cv2.putText(
+                        debug_img,
+                        f"Rate: {detected_rate}, Place: {i + 1}",
+                        (rate_x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 0),
+                        2,
+                    )
                     imwrite_safe("debug_detection.png", debug_img)
 
                 return detected_rate, i + 1
 
         return None, None
 
-    def _preprocess_rate_region(self, rate_region: np.ndarray):
+    def _rates_in_match_info(self, img: np.ndarray):
         """
-        レート領域の前処理（背景除去と数字強調）
+        マッチ画面からレート情報を検出する
+        Returns: (list of rates, my_rate)
         """
-        if rate_region.size == 0:
-            return rate_region
-
-        # グレースケール化
-        if len(rate_region.shape) == 3:
-            gray = cv2.cvtColor(rate_region, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = rate_region.copy()
-
-        # ヒストグラム平均化でコントラストを向上
-        enhanced = cv2.equalizeHist(gray)
-
-        # ガウシアンぼかしを適用してノイズを除去
-        blurred = cv2.GaussianBlur(enhanced, (3, 3), 0)
-
-        # 適応的二値化で数字と背景を分離
-        # 白い数字を抽出するため、閾値処理を適用
-        _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-        # モルフォロジー処理でノイズを除去
-        kernel = np.ones((2, 2), np.uint8)
-        cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
-
-        return cleaned
-
-    def _rates_in_match_info(self, img):
-        players_roi = players_roi_base
-
-        players_img = crop_img(img, players_roi)
-
-        players = []
-        for x in range(2):
-            for y in range(6):
-                players.append(
-                    crop_img(players_img, [x / 2, y / 6, (x + 1) / 2, (y + 1) / 6])
-                )
+        h, w = img.shape[:2]
+        scale_x = w / 1280.0
+        scale_y = h / 720.0
 
         rates = []
-        for i, p in enumerate(players):
-            rate_img = crop_img(p, [0.75, 0.5, 0.995, 0.995])
-            rate_img = cv2.cvtColor(rate_img, cv2.COLOR_BGR2GRAY)
-            ret, rate = mk8dx_digit_ocr.detect_digit(rate_img)
-            if not ret:
-                rate = 0
-            if not (500 <= rate <= 99999):
-                rate = 0
-            rates.append(rate)
+        my_rate = None
 
-        return rates
+        # 左列と右列の座標（1280x720基準）
+        left_col_x1 = int(10 * scale_x)
+        left_col_x2 = int(180 * scale_x)
+        right_col_x1 = int(190 * scale_x)
+        right_col_x2 = int(360 * scale_x)
 
-    def _rates_in_result(self, img, rule, min_my_rate=100, max_my_rate=99999):
-        inv_img = 255 - cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        for i, roi in enumerate(result_rates_rois):
-            crop = crop_img(inv_img, roi)
-            # レースタイプがパックンVSスパイなら自分の色が反転してる
-            if rule == "パックンVSスパイ":
-                if self.debug:
-                    imwrite_safe(f"a_crop_{i}.png", crop)
-                ret, my_rate = mk8dx_digit_ocr.digit_ocr.detect_black_digit(
-                    crop
-                )  # , verbose=True)
-            else:
-                if self.debug:
-                    imwrite_safe(f"crop_{i}.png", crop)
-                ret, my_rate = mk8dx_digit_ocr.digit_ocr.detect_white_digit(
-                    crop
-                )  # , verbose=True)
+        # 各列のプレイヤー行をチェック（最大13行ずつ）
+        for col_x1, col_x2 in [(left_col_x1, left_col_x2), (right_col_x1, right_col_x2)]:
+            for i in range(13):
+                y1 = int((25 + 53 * i) * scale_y)
+                y2 = int((75 + 53 * i) * scale_y)
 
-            if ret and min_my_rate <= my_rate <= max_my_rate:
-                rates_after = []
-                for roi in result_rates_rois:
-                    crop = crop_img(inv_img, roi)
-                    ret, rate = mk8dx_digit_ocr.digit_ocr.detect_digit(crop)
-                    if not ret:
-                        rate = 0
-                    if not (500 <= rate <= 99999):
-                        rate = 0
-                    rates_after.append(rate)
+                if y2 >= h or col_x2 >= w:
+                    continue
 
-                return True, my_rate, i + 1, rates_after
+                player_row = img[y1:y2, col_x1:col_x2]
 
-        return False, 0, 0, []
+                # レート部分は右端50%の領域（レート数字は右端に表示される）
+                rate_width = int(player_row.shape[1] * 0.5)
+                rate_region = player_row[:, -rate_width:]
+
+                # 白文字のレートを検出（自分のレート）
+                is_white = self._is_white_text(rate_region)
+                detected_rate, confidence = self._detect_digits_in_image(
+                    rate_region, threshold=0.4, use_match_templates=True
+                )
+
+                if detected_rate is not None and 1000 <= detected_rate <= 99999:
+                    rates.append(detected_rate)
+                    if is_white and my_rate is None:
+                        my_rate = detected_rate
+                else:
+                    rates.append(0)
+
+        return rates, my_rate
+
+    def _is_white_text(self, region: np.ndarray) -> bool:
+        """
+        領域のテキストが白色かどうかを判定
+        白色：RGB値が高い（200以上）
+        灰色：RGB値が中程度（100-200）
+        """
+        gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+        white_pixels = np.sum(gray > 200)
+        total_pixels = gray.size
+
+        # 白色ピクセルの割合が10%以上なら白色テキスト
+        white_ratio = white_pixels / total_pixels
+        return white_ratio > 0.1
