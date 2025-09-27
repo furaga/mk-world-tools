@@ -57,7 +57,10 @@ class LapTimer:
 
             freeze_duration = current_wall_time - self.freeze_start_time
 
-            if freeze_duration >= self.freeze_threshold and self.same_time_count >= self.detection_threshold:
+            if (
+                freeze_duration >= self.freeze_threshold
+                and self.same_time_count >= self.detection_threshold
+            ):
                 lap_time = self.current_time
                 if len(self.lap_times) == 0 or abs(lap_time - self.lap_times[-1]) > 0.5:
                     self.lap_times.append(lap_time)
@@ -86,7 +89,7 @@ def OBS_update_lap_times(obs: OBSController, lap_times: list[str]):
     if not lap_times:
         return
 
-    lap_text = "\n".join([f"Lap {i+1}: {t}" for i, t in enumerate(lap_times)])
+    lap_text = "/".join([f"{i + 1}: {t}" for i, t in enumerate(lap_times)])
     obs.set_text(obs.config.get("lap_times", "lap_times"), lap_text)
 
 
@@ -144,42 +147,11 @@ def main(args):
         if lap_time is not None and obs:
             OBS_update_lap_times(obs, lap_timer.get_lap_times())
 
-        if args.imshow:
-            display_frame = frame.copy()
-            if detected:
-                cv2.putText(
-                    display_frame,
-                    f"Timer: {lap_timer._format_time(timer_value)}",
-                    (50, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    (0, 255, 0),
-                    2,
-                )
-            lap_times = lap_timer.get_lap_times()
-            for i, lap_time_str in enumerate(lap_times):
-                cv2.putText(
-                    display_frame,
-                    f"Lap {i+1}: {lap_time_str}",
-                    (50, 100 + i * 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (255, 255, 0),
-                    2,
-                )
-            cv2.imshow("frame", display_frame)
-            if cv2.waitKey(1) == ord("q"):
-                break
-
         if config.get("fps", 0) > 0:
             time_to_sleep = 1.0 / config["fps"] - (time.time() - since)
             if time_to_sleep > 0:
                 time.sleep(time_to_sleep)
             since = time.time()
-
-    logger.info("Final lap times:")
-    for i, lap_time in enumerate(lap_timer.get_lap_times()):
-        logger.info(f"  Lap {i+1}: {lap_time}")
 
 
 if __name__ == "__main__":
