@@ -1,3 +1,6 @@
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = $scriptDir
+
 Write-Host "Checking for existing plot_mkworld_rate.py processes..."
 $existingProcesses = Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" | Where-Object { $_.CommandLine -like '*plot_mkworld_rate.py*' }
 
@@ -14,18 +17,21 @@ if ($existingProcesses) {
 
 Get-Job | Remove-Job
 
-$csvPath = ".cache/mkworld-race.csv"
+$csvPath = Join-Path $projectRoot ".cache\mkworld-race.csv"
+$plotScript = Join-Path $projectRoot "plot_mkworld_rate.py"
+$recorderScript = Join-Path $projectRoot "scripts\auto_recorder.py"
 
 $plotJob = Start-Job -ScriptBlock {
-    param($workDir, $csvPath)
+    param($workDir, $plotScript, $csvPath)
     Set-Location $workDir
-    uv run python plot_mkworld_rate.py --file $csvPath
-} -ArgumentList $PWD, $csvPath
+    uv run python $plotScript --file $csvPath
+} -ArgumentList $projectRoot, $plotScript, $csvPath
 
 Write-Host "Starting rate plot display in background (Job ID: $($plotJob.Id))..."
 
-Write-Host "Running make mkworld-race --debug..."
-make mkworld-race --debug
+Write-Host "Running auto_recorder"
+Set-Location $projectRoot
+uv run python $recorderScript --out_csv_path $csvPath --game mkworld-race
 
 Write-Host "`nStopping plot job..."
 Stop-Job -Job $plotJob

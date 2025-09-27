@@ -5,7 +5,8 @@
       "Bash(uv run pytest .testsscreen_parsertest_MKWorldParser.py::TestMKWorldScreenParser::test_detect_match_info_with_mkw_match_images -v)",
       "Bash(uv run pytest tests/screen_parser/test_MKWorldParser.py::TestMKWorldScreenParser::test_detect_match_info_with_mkw_match_images -v)",
       "Bash(python:*)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
