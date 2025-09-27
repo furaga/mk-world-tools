@@ -93,7 +93,7 @@ class MKWorldScreenParser(ScreenParser):
                 if digit_templates:
                     self.match_digit_templates[str(i)] = digit_templates
 
-        # 順位テンプレート画像を読み込む
+        # 順位テンプレート画像を読み込む（白色二値化版）
         self.place_templates = {}
         places_dir = template_images_dir / "places"
         if places_dir.exists():
@@ -101,7 +101,10 @@ class MKWorldScreenParser(ScreenParser):
                 place_num = int(place_path.stem)
                 template = imread_safe(str(place_path))
                 if template is not None:
-                    self.place_templates[place_num] = template
+                    # 白色領域を抽出して保存
+                    gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+                    _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+                    self.place_templates[place_num] = binary
 
         # テンプレート画像の総数を計算
         total_digit_templates = sum(
@@ -156,6 +159,10 @@ class MKWorldScreenParser(ScreenParser):
                 my_rate, my_place = det["rate"], det["place"]
                 break
 
+        if self.debug:
+            print(f"detections: {detections}")
+            print(f"my_rate: {my_rate}, my_place: {my_place}")
+
         if my_rate is None or not (self.min_my_rate <= my_rate <= self.max_my_rate):
             return False, None
 
@@ -164,9 +171,17 @@ class MKWorldScreenParser(ScreenParser):
         # 最大24人のプレイヤーをサポート
         max_place = max((det["place"] for det in detections), default=13)
         rates = [0] * max(max_place, 13)
+
+        # 他のプレイヤーのレートを設定（自分以外）
         for det in detections:
+            if det["is_my_rate"]:
+                continue
             if 1 <= det["place"] <= len(rates):
                 rates[det["place"] - 1] = det["rate"]
+
+        # 自分のレートを最後に設定（上書きを防ぐ）
+        if 1 <= my_place <= len(rates):
+            rates[my_place - 1] = my_rate
 
         result_info = ResultInfo(
             players=[
@@ -316,26 +331,34 @@ class MKWorldScreenParser(ScreenParser):
 
         return binary
 
-    def _detect_place(self, region: np.ndarray, threshold=0.7) -> int:
+    def _detect_place(self, region: np.ndarray, threshold=0.4) -> int:
         """
-        順位領域から順位をテンプレートマッチングで検出
+        順位領域から順位をテンプレートマッチングで検出（白色二値化版）
         Returns: 検出された順位（1-24）、検出失敗時はNone
         """
+        # グレースケール化
+        gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+
+        # 白色領域を抽出（閾値200以上を白とする）
+        _, region_binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+
         best_score = 0
         best_place = None
+        scores = []
 
-        print("------")
-        for place_num, template in self.place_templates.items():
+        for place_num, template_binary in self.place_templates.items():
             if (
-                template.shape[0] > region.shape[0]
-                or template.shape[1] > region.shape[1]
+                template_binary.shape[0] > region_binary.shape[0]
+                or template_binary.shape[1] > region_binary.shape[1]
             ):
                 continue
 
-            result = cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED)
+            result = cv2.matchTemplate(
+                region_binary, template_binary, cv2.TM_CCOEFF_NORMED
+            )
             _, max_val, _, _ = cv2.minMaxLoc(result)
+            scores.append((place_num, max_val))
 
-            print(f"place_num: {place_num}, max_val: {max_val}")
             if max_val > best_score:
                 best_score = max_val
                 best_place = place_num
@@ -358,16 +381,17 @@ class MKWorldScreenParser(ScreenParser):
         rate_x2 = int(1865 * scale_x)
 
         # 順位表示領域の固定座標（1920x1080基準）
-        place_x1 = int(1060 * scale_x)
+        place_x1 = int(1070 * scale_x)
         place_x2 = int(1145 * scale_x)
 
         # 全13行をチェック
         detections = []
         for i in range(13):
-            y1 = int((40 + 70 * i) * scale_y)
-            y2 = int((110 + 70 * i) * scale_y)
+            y1 = int((40 + 77 * i) * scale_y)
+            y2 = int((110 + 77 * i) * scale_y)
 
             if y2 >= h or rate_x2 >= w or place_x2 >= w:
+                print(f"Skip: y2: {y2}, rate_x2: {rate_x2}, place_x2: {place_x2}")
                 continue
 
             # プレイヤー行全体を取得（黄色判定用）
@@ -382,9 +406,9 @@ class MKWorldScreenParser(ScreenParser):
             # 順位領域を抽出
             place_region = img[y1:y2, place_x1:place_x2]
 
-            #   if self.debug:
-            imwrite_safe("debug_rate_region.png", rate_region)
-            imwrite_safe("debug_place_region.png", place_region)
+            if self.debug:
+                imwrite_safe(f"debug_rate_region_{i}.png", rate_region)
+                imwrite_safe(f"debug_place_region_{i}.png", place_region)
 
             # レートをテンプレートマッチングで検出
             detected_rate, confidence = self._detect_digits_in_image(
@@ -394,15 +418,13 @@ class MKWorldScreenParser(ScreenParser):
                 y_overlap_threshold=35 / 2 * scale_y,
             )
 
-            # 順位をテンプレートマッチングで検出
-            detected_place = None
-            if is_my_rate:
-                detected_place = self._detect_place(place_region, threshold=0.3)
+            # 順位をテンプレートマッチングで検出（二値化版）
+            detected_place = self._detect_place(place_region, threshold=0.4)
 
             # レートが検出された場合のみ追加（順位が検出できない場合はデフォルト値を使用）
             if detected_rate:
                 # 順位が検出できなかった場合は行番号を使用（フォールバック）
-                place = detected_place if detected_place else -1
+                place = detected_place if detected_place else i + 1
 
                 if self.debug:
                     debug_img = img.copy()
@@ -456,7 +478,7 @@ class MKWorldScreenParser(ScreenParser):
             (left_col_x1, left_col_x2),
             (right_col_x1, right_col_x2),
         ]:
-            for i in range(12):
+            for i in range(13):
                 y1 = int((59 + 51 * i) * scale_y)
                 y2 = int((103 + 51 * i) * scale_y)
                 if y2 >= h or col_x2 >= w:
@@ -477,14 +499,6 @@ class MKWorldScreenParser(ScreenParser):
                     x_overlap_threshold=9 * scale_x,
                     y_overlap_threshold=14 * scale_y,
                 )
-
-                # # 検出結果をデバッグ出力
-                # if detected_rate is not None:
-                #     print(f"Detected rate: {detected_rate}, Confidence: {confidence}")
-                #     # 切り出した画像を保存
-                #     imwrite_safe(
-                #         f"debug_rate_region_{i}_{detected_rate}.png", rate_region
-                #     )
 
                 if detected_rate is not None and 1000 <= detected_rate <= 99999:
                     rates.append(detected_rate)

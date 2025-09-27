@@ -129,9 +129,6 @@ def update_results(
     result_info: ResultInfo, game_info: GameInfo, obs: Optional[OBSController]
 ):
     rates_in_result = [p.rate for p in result_info.players]
-    print("--------------------------------")
-    for rate in rates_in_result:
-        print(rate)
     n_valid = count_valid_rates(rates_in_result)
     prev_n_valid = count_valid_rates(game_info.rates_in_result)
 

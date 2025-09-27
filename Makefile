@@ -3,7 +3,7 @@ ARGS ?=  # ARGSが未定義の場合、空文字列をデフォルト値とし�
 
 define run_recorder
 $(1):
-	uv run python ./scripts/auto_recorder.py --out_csv_path data/record/$(1).csv --game $(1) $(ARGS)
+	uv run python ./scripts/auto_recorder.py --out_csv_path .cache/record/$(1).csv --game $(1) $(ARGS)
 endef
 
 $(foreach game,$(GAMES),$(eval $(call run_recorder,$(game))))
