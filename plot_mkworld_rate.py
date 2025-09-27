@@ -1,10 +1,7 @@
 import argparse
 
-import dash
-import dash_core_components as dcc
-import dash_html_components as html
 import plotly.graph_objs as go
-from dash.dependencies import Input, Output
+from dash import Dash, Input, Output, dcc, html
 
 
 class MKWorldRatePlotter:
@@ -12,7 +9,7 @@ class MKWorldRatePlotter:
         self.file_path = file_path
         self.line_color = line_color
         self.show_num = show_num
-        self.app = dash.Dash(__name__)
+        self.app = Dash(__name__)
         self._setup_layout()
         self._setup_callbacks()
 
@@ -163,7 +160,7 @@ class MKWorldRatePlotter:
             return fig
 
     def run(self, debug=True, host="127.0.0.1", port=8050):
-        self.app.run_server(debug=debug, host=host, port=port)
+        self.app.run(debug=debug, host=host, port=port)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ if ($existingProcesses) {
 
 Get-Job | Remove-Job
 
-$csvPath = ".cache/record/mkworld-race.csv"
+$csvPath = ".cache/mkworld-race.csv"
 
 $plotJob = Start-Job -ScriptBlock {
     param($workDir, $csvPath)
