@@ -121,7 +121,16 @@ def update_match_info(
     if n_valid >= max(prev_n_valid, 3):
         game_info.match_info = match_info
         if obs:
-            obs.set_text(obs.config["course"], f"{game_info.course}, {game_info.rule}")
+            # obs.set_text(obs.config["course"], f"{game_info.course}, {game_info.rule}")
+            # 部屋の平均・最小・最大レート
+            valid_rates = [v for v in game_info.rates_in_match_info if v > 0]
+            avg_rate = np.mean(valid_rates)
+            min_rate = np.min(valid_rates)
+            max_rate = np.max(valid_rates)
+            obs.set_text(
+                obs.config["course"],
+                f"平均レート  {avg_rate:.1f} ({min_rate}-{max_rate})",
+            )
         return True
     return False
 
