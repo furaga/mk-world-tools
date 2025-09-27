@@ -129,7 +129,8 @@ def update_match_info(
             max_rate = np.max(valid_rates)
             obs.set_text(
                 obs.config["course"],
-                f"平均レート  {avg_rate:.1f} ({min_rate}-{max_rate})",
+                #                f"平均レート  {avg_rate:.1f} ({min_rate}-{max_rate})",
+                f"Room Avg. {avg_rate:.1f}",  # ({min_rate}-{max_rate})",
             )
         return True
     return False
