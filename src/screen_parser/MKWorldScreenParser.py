@@ -119,8 +119,10 @@ class MKWorldScreenParser(ScreenParser):
     def detect_match_info(self, img: np.ndarray) -> Tuple[bool, MatchInfo]:
         course, race_type = self._course(img)
         rates, my_rate = self._rates_in_match_info(img)
+        print(f"my_rate: {my_rate}")
+
         n_valid = len([x for x in rates if x > 0])
-        if n_valid < 3:
+        if n_valid < 1:
             return False, None
 
         players = []
@@ -200,7 +202,14 @@ class MKWorldScreenParser(ScreenParser):
 
         return best_course, best_race_type
 
-    def _detect_digits_in_image(self, img: np.ndarray, threshold=0.4, use_match_templates=False):
+    def _detect_digits_in_image(
+        self,
+        img: np.ndarray,
+        threshold=0.4,
+        use_match_templates=False,
+        scale_x=1.0,
+        scale_y=1.0,
+    ):
         """
         画像内の数字をテンプレートマッチングで検出する
         Returns: (detected_rate, confidence)
@@ -242,13 +251,14 @@ class MKWorldScreenParser(ScreenParser):
         detections.sort(key=lambda x: x["x"])
 
         # 重複した検出を除去（同じ位置に複数の数字が検出された場合、信頼度が高い方を採用）
+        # X座標とY座標の両方を考慮
         filtered_detections = []
         for detection in detections:
             is_duplicate = False
             for i, existing in enumerate(filtered_detections):
-                if (
-                    abs(detection["x"] - existing["x"]) < 8
-                ):  # 8ピクセル以内なら重複とみなす
+                x_overlap = abs(detection["x"] - existing["x"]) < 9 * scale_x
+                y_overlap = abs(detection["y"] - existing["y"]) < 14 * scale_y
+                if x_overlap and y_overlap:  # 位置が近い場合は重複とみなす
                     # より高い信頼度のものを採用
                     if detection["confidence"] > existing["confidence"]:
                         filtered_detections[i] = detection
@@ -305,7 +315,7 @@ class MKWorldScreenParser(ScreenParser):
 
             # この領域で数字認識を実行
             detected_rate, confidence = self._detect_digits_in_image(
-                rate_region, threshold=0.6
+                rate_region, threshold=0.6, scale_x=scale_x, scale_y=scale_y
             )
 
             if (
@@ -377,7 +387,7 @@ class MKWorldScreenParser(ScreenParser):
 
             # カラー画像でテンプレートマッチング（閾値0.65で誤検出を抑制）
             detected_rate, confidence = self._detect_digits_in_image(
-                rate_region, threshold=0.65
+                rate_region, threshold=0.65, scale_x=scale_x, scale_y=scale_y
             )
 
             # 自分のレート範囲内なら返す
@@ -415,31 +425,46 @@ class MKWorldScreenParser(ScreenParser):
         my_rate = None
 
         # 左列と右列の座標（1280x720基準）
-        left_col_x1 = int(10 * scale_x)
-        left_col_x2 = int(180 * scale_x)
-        right_col_x1 = int(190 * scale_x)
-        right_col_x2 = int(360 * scale_x)
+        # 各列はプレイヤー行全体を含み、レートは右端に表示される
+        left_col_x1 = int(27 * scale_x)
+        left_col_x2 = int(360 * scale_x)
+        right_col_x1 = int(363 * scale_x)
+        right_col_x2 = int(693 * scale_x)
 
         # 各列のプレイヤー行をチェック（最大13行ずつ）
-        for col_x1, col_x2 in [(left_col_x1, left_col_x2), (right_col_x1, right_col_x2)]:
-            for i in range(13):
-                y1 = int((25 + 53 * i) * scale_y)
-                y2 = int((75 + 53 * i) * scale_y)
-
+        for col_x1, col_x2 in [
+            (left_col_x1, left_col_x2),
+            (right_col_x1, right_col_x2),
+        ]:
+            for i in range(12):
+                y1 = int((59 + 51 * i) * scale_y)
+                y2 = int((103 + 51 * i) * scale_y)
                 if y2 >= h or col_x2 >= w:
                     continue
 
                 player_row = img[y1:y2, col_x1:col_x2]
 
-                # レート部分は右端50%の領域（レート数字は右端に表示される）
-                rate_width = int(player_row.shape[1] * 0.5)
+                # レート部分は右端25%の領域（レート数字は右端に表示される）
+                rate_width = int(player_row.shape[1] * 0.25)
                 rate_region = player_row[:, -rate_width:]
 
                 # 白文字のレートを検出（自分のレート）
                 is_white = self._is_white_text(rate_region)
                 detected_rate, confidence = self._detect_digits_in_image(
-                    rate_region, threshold=0.4, use_match_templates=True
+                    rate_region,
+                    threshold=0.8,
+                    use_match_templates=True,
+                    scale_x=scale_x,
+                    scale_y=scale_y,
                 )
+
+                # 検出結果をデバッグ出力
+                if detected_rate is not None:
+                    print(f"Detected rate: {detected_rate}, Confidence: {confidence}")
+                    # 切り出した画像を保存
+                    imwrite_safe(
+                        f"debug_rate_region_{i}_{detected_rate}.png", rate_region
+                    )
 
                 if detected_rate is not None and 1000 <= detected_rate <= 99999:
                     rates.append(detected_rate)
@@ -460,6 +485,6 @@ class MKWorldScreenParser(ScreenParser):
         white_pixels = np.sum(gray > 200)
         total_pixels = gray.size
 
-        # 白色ピクセルの割合が10%以上なら白色テキスト
+        # 白色ピクセルの割合が3%以上なら白色テキスト
         white_ratio = white_pixels / total_pixels
-        return white_ratio > 0.1
+        return white_ratio > 0.03
