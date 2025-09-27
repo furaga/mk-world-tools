@@ -541,7 +541,7 @@ class MKWorldScreenParser(ScreenParser):
         white_ratio = white_pixels / total_pixels
         return white_ratio > 0.03
 
-    def detect_timer(self, img: np.ndarray) -> tuple[bool, float]:
+    def detect_timer(self, img: np.ndarray, threshold: float = 0.65) -> tuple[bool, float]:
         h, w = img.shape[:2]
         scale_x = w / 1920.0
         scale_y = h / 1080.0
@@ -557,7 +557,7 @@ class MKWorldScreenParser(ScreenParser):
         timer_region = img[y1:y2, x1:x2]
 
         gray = cv2.cvtColor(timer_region, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+        _, binary = cv2.threshold(gray, 140, 255, cv2.THRESH_BINARY)
 
         detections = []
         for digit, templates in self.timer_digit_templates.items():
@@ -569,7 +569,7 @@ class MKWorldScreenParser(ScreenParser):
                     continue
 
                 result = cv2.matchTemplate(binary, template_binary, cv2.TM_CCOEFF_NORMED)
-                locations = np.where(result >= 0.6)
+                locations = np.where(result >= threshold)
 
                 for pt in zip(*locations[::-1]):
                     confidence = result[pt[1], pt[0]]
