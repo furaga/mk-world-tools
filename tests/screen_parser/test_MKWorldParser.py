@@ -221,6 +221,57 @@ class TestMKWorldScreenParser(unittest.TestCase):
         self.assertFalse(success, "黒い画像でレート検出が成功してしまいました")
         self.assertIsNone(match_info, "失敗時のMatchInfoがNoneではありません")
 
+    def test_detect_timer_with_ta_images(self):
+        """
+        tests/screen_parser/data/ta/内のタイムアタック画像をテスト
+        ファイル名形式: mkw_ta_<分>m<秒>s<ミリ秒>.png
+        """
+        test_data_dir = Path("tests/screen_parser/data/ta")
+
+        image_files = list(test_data_dir.glob("mkw_ta_*.png"))
+        image_files.extend(list(test_data_dir.glob("mkw_ta_*.jpg")))
+
+        if not image_files:
+            self.skipTest(f"テスト画像が見つかりません: {test_data_dir}")
+
+        for image_path in image_files:
+            with self.subTest(image=image_path.name):
+                time_str = image_path.stem.replace("mkw_ta_", "")
+                parts = time_str.replace("m", "_").replace("s", "_").split("_")
+                if len(parts) >= 3:
+                    minutes = int(parts[0])
+                    seconds = int(parts[1])
+                    milliseconds = int(parts[2])
+                    expected_time = minutes * 60 + seconds + milliseconds / 1000.0
+                else:
+                    self.fail(f"ファイル名のフォーマットが不正です: {image_path.name}")
+
+                img = imread_safe(str(image_path))
+                self.assertIsNotNone(img, f"画像の読み込みに失敗しました: {image_path}")
+
+                detected, timer_value = self.parser.detect_timer(img)
+
+                self.assertTrue(
+                    detected, f"detect_timer()が失敗しました: {image_path.name}"
+                )
+
+                self.assertAlmostEqual(
+                    timer_value,
+                    expected_time,
+                    places=1,
+                    msg=f"タイマー値が期待値と異なります ({image_path.name}): 期待値={expected_time:.3f}, 実際={timer_value:.3f}",
+                )
+
+    def test_detect_timer_with_invalid_image(self):
+        """
+        無効な画像でのdetect_timer()のテスト
+        """
+        black_img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+        detected, timer_value = self.parser.detect_timer(black_img)
+
+        self.assertFalse(detected, "黒い画像でタイマー検出が成功してしまいました")
+
 
 if __name__ == "__main__":
     unittest.main()

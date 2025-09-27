@@ -106,6 +106,17 @@ class MKWorldScreenParser(ScreenParser):
                     _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
                     self.place_templates[place_num] = binary
 
+        # タイマー用の数字テンプレート画像を読み込む
+        self.timer_digit_templates = {}
+        timer_digits_dir = template_images_dir / "ta"
+        if timer_digits_dir.exists():
+            for i in range(10):
+                digit_path = timer_digits_dir / f"{i}.png"
+                if digit_path.exists():
+                    template = imread_safe(str(digit_path))
+                    if template is not None:
+                        self.timer_digit_templates[str(i)] = [template]
+
         # テンプレート画像の総数を計算
         total_digit_templates = sum(
             len(templates) for templates in self.digit_templates.values()
@@ -115,7 +126,7 @@ class MKWorldScreenParser(ScreenParser):
         )
 
         logger.info(
-            f"Loaded {len(self.course_dict)} courses, {len(self.race_type_dict)} race types, {total_digit_templates} result digit templates ({len(self.digit_templates)} digits), {total_match_digit_templates} match digit templates ({len(self.match_digit_templates)} digits), and {len(self.place_templates)} place templates"
+            f"Loaded {len(self.course_dict)} courses, {len(self.race_type_dict)} race types, {total_digit_templates} result digit templates ({len(self.digit_templates)} digits), {total_match_digit_templates} match digit templates ({len(self.match_digit_templates)} digits), {len(self.place_templates)} place templates, and {len(self.timer_digit_templates)} timer digit templates"
         )
 
     def detect_match_info(self, img: np.ndarray) -> Tuple[bool, MatchInfo]:
@@ -529,3 +540,93 @@ class MKWorldScreenParser(ScreenParser):
         # 白色ピクセルの割合が3%以上なら白色テキスト
         white_ratio = white_pixels / total_pixels
         return white_ratio > 0.03
+
+    def detect_timer(self, img: np.ndarray) -> tuple[bool, float]:
+        h, w = img.shape[:2]
+        scale_x = w / 1920.0
+        scale_y = h / 1080.0
+
+        x1 = int(1531 * scale_x)
+        y1 = int(38 * scale_y)
+        x2 = int(1871 * scale_x)
+        y2 = int(120 * scale_y)
+
+        if y2 >= h or x2 >= w:
+            return False, 0.0
+
+        timer_region = img[y1:y2, x1:x2]
+
+        gray = cv2.cvtColor(timer_region, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+
+        detections = []
+        for digit, templates in self.timer_digit_templates.items():
+            for template in templates:
+                template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+                _, template_binary = cv2.threshold(template_gray, 150, 255, cv2.THRESH_BINARY)
+
+                if template_binary.shape[0] > binary.shape[0] or template_binary.shape[1] > binary.shape[1]:
+                    continue
+
+                result = cv2.matchTemplate(binary, template_binary, cv2.TM_CCOEFF_NORMED)
+                locations = np.where(result >= 0.6)
+
+                for pt in zip(*locations[::-1]):
+                    confidence = result[pt[1], pt[0]]
+                    detections.append({
+                        "digit": digit,
+                        "x": pt[0],
+                        "y": pt[1],
+                        "confidence": confidence,
+                    })
+
+        if not detections:
+            return False, 0.0
+
+        detections.sort(key=lambda x: x["x"])
+
+        filtered_detections = []
+        for detection in detections:
+            is_duplicate = False
+            for i, existing in enumerate(filtered_detections):
+                x_overlap = abs(detection["x"] - existing["x"]) < 15
+                y_overlap = abs(detection["y"] - existing["y"]) < 15
+                if x_overlap and y_overlap:
+                    if detection["confidence"] > existing["confidence"]:
+                        filtered_detections[i] = detection
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                filtered_detections.append(detection)
+
+        filtered_detections.sort(key=lambda x: x["x"])
+        digit_string = "".join([d["digit"] for d in filtered_detections])
+
+        time_seconds = self._parse_timer_string(digit_string)
+        if time_seconds is not None:
+            return True, time_seconds
+        return False, 0.0
+
+    def _parse_timer_string(self, digit_string: str) -> float:
+        if len(digit_string) < 6:
+            return None
+
+        try:
+            if len(digit_string) == 6:
+                minutes = int(digit_string[0])
+                seconds = int(digit_string[1:3])
+                milliseconds = int(digit_string[3:6])
+            elif len(digit_string) == 7:
+                minutes = int(digit_string[0:2])
+                seconds = int(digit_string[2:4])
+                milliseconds = int(digit_string[4:7])
+            else:
+                return None
+
+            if seconds >= 60 or milliseconds >= 1000:
+                return None
+
+            total_seconds = minutes * 60 + seconds + milliseconds / 1000.0
+            return total_seconds
+        except ValueError:
+            return None
