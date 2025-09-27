@@ -154,10 +154,12 @@ class MKWorldScreenParser(ScreenParser):
         detections = self._detect_result_rates(img)
         my_rate = None
         my_place = None
-        for det in detections:
-            if det["is_my_rate"]:
-                my_rate, my_place = det["rate"], det["place"]
-                break
+
+        # 最も黄色の割合が高い行を自分のレートとして選択
+        my_rate_candidates = [det for det in detections if det["is_my_rate"]]
+        if my_rate_candidates:
+            best_candidate = max(my_rate_candidates, key=lambda x: x["yellow_ratio"])
+            my_rate, my_place = best_candidate["rate"], best_candidate["place"]
 
         if self.debug:
             print(f"detections: {detections}")
@@ -306,18 +308,18 @@ class MKWorldScreenParser(ScreenParser):
 
         return None, 0.0
 
-    def _is_yellow_background(self, region: np.ndarray) -> bool:
+    def _is_yellow_background(self, region: np.ndarray) -> float:
         """
-        領域の背景が黄色かどうかを簡易判定
+        領域の背景が黄色かどうかを判定し、黄色ピクセルの割合を返す
         """
         hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
         lower_yellow = np.array([15, 100, 100])
         upper_yellow = np.array([35, 255, 255])
         yellow_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        # 黄色ピクセルの割合が30%以上なら黄色背景
+        # 黄色ピクセルの割合を返す
         yellow_ratio = np.count_nonzero(yellow_mask) / yellow_mask.size
-        return yellow_ratio > 0.3
+        return yellow_ratio
 
     def _extract_white_digits(self, region: np.ndarray) -> np.ndarray:
         """
@@ -370,7 +372,7 @@ class MKWorldScreenParser(ScreenParser):
     def _detect_result_rates(self, img: np.ndarray):
         """
         固定座標で全プレイヤー行をチェックし、黄色背景の行からレートを検出
-        Returns: list of detections with rate, place, and is_my_rate
+        Returns: list of detections with rate, place, is_my_rate, and yellow_ratio
         """
         h, w = img.shape[:2]
         scale_x = w / 1920.0
@@ -397,8 +399,8 @@ class MKWorldScreenParser(ScreenParser):
             # プレイヤー行全体を取得（黄色判定用）
             player_row = img[y1:y2, w // 2 :]  # 右半分のみ
 
-            # 黄色背景かチェック
-            is_my_rate = self._is_yellow_background(player_row)
+            # 黄色背景の割合を取得
+            yellow_ratio = self._is_yellow_background(player_row)
 
             # レート領域を抽出
             rate_region = img[y1:y2, rate_x1:rate_x2]
@@ -419,8 +421,8 @@ class MKWorldScreenParser(ScreenParser):
             )
 
             # 順位をテンプレートマッチングで検出（二値化版）
-            if is_my_rate:
-                # 重いので自分のレートのみ検出
+            if yellow_ratio > 0.3:
+                # 黄色の割合が30%以上の行のみ順位を検出
                 detected_place = self._detect_place(place_region, threshold=0.4)
             else:
                 detected_place = None
@@ -453,7 +455,8 @@ class MKWorldScreenParser(ScreenParser):
                     {
                         "rate": detected_rate,
                         "place": place,
-                        "is_my_rate": is_my_rate,
+                        "is_my_rate": yellow_ratio > 0.3,
+                        "yellow_ratio": yellow_ratio,
                     }
                 )
         return detections
