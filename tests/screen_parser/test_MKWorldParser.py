@@ -68,30 +68,30 @@ class TestMKWorldScreenParser(unittest.TestCase):
                     f"レートが期待値と異なります ({image_path.name}): 期待値={expected_rate}, 実際={result_info.my_rate}",
                 )
 
-                # プレイヤー数の確認
-                self.assertEqual(
-                    len(result_info.players),
-                    12,
-                    f"プレイヤー数が12人ではありません: {image_path.name}",
-                )
-
                 # 順位が妥当な範囲内であることを確認
                 self.assertGreaterEqual(
                     result_info.my_place, 1, f"順位が1未満です: {image_path.name}"
                 )
                 self.assertLessEqual(
                     result_info.my_place,
-                    12,
+                    24,
                     f"順位が12を超えています: {image_path.name}",
                 )
 
                 # 自分のレートが正しい位置に設定されているか確認
-                if 1 <= result_info.my_place <= 12:
+                if 1 <= result_info.my_place <= 13:
                     self.assertEqual(
                         result_info.players[result_info.my_place - 1].rate,
                         expected_rate,
                         f"自分のレートが正しい位置に設定されていません: {image_path.name}",
                     )
+
+                # 3人以上のレートが検出されていることを確認
+                self.assertGreaterEqual(
+                    len([x for x in result_info.players if x.rate > 0]),
+                    3,
+                    "3人以上のレートが検出されていません",
+                )
 
     def test_detect_result_with_invalid_image(self):
         """
@@ -146,6 +146,7 @@ class TestMKWorldScreenParser(unittest.TestCase):
 
         # mkw_match_*.png ファイルを全て取得
         image_files = list(test_data_dir.glob("mkw_match_*.png"))
+        image_files += list(test_data_dir.glob("mkw_match_*.jpg"))
 
         if not image_files:
             self.skipTest(

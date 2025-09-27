@@ -60,13 +60,13 @@ class OBSController:
     def capture_game_screen(
         self, sourceName: str = "映像キャプチャデバイス"
     ) -> np.ndarray:
-        out_path = self.cache_dir / "obs_screenshot.jpg"
+        out_path = str(self.cache_dir.absolute() / "obs_screenshot.jpg")
         self.obs_ws_.call(
             obswebsocket.requests.TakeSourceScreenshot(
                 sourceName=sourceName,
                 embedPictureFormat="jpg",
-                saveToFilePath=str(out_path).replace("\\", "/"),
+                saveToFilePath=out_path.replace("\\", "/"),
             )
         )
-        img = cv2.imread(str(out_path))
+        img = cv2.imread(out_path)
         return img

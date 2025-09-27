@@ -30,7 +30,17 @@ games:
       course: "バトル_コース情報"
       chart_browser: "ブラウザ_レート遷移"
 
-  mkworld-race: null
+  mkworld-race: 
+    parser:
+      template_images_dir: data/mkworld
+      min_my_rate: 8000
+      max_my_rate: 10000
+    obs:
+      my_rate: "現在レート"
+      my_place: "前回順位"
+      course: "コース情報"
+      chart_browser: "ブラウザ_レート遷移"
+
   mkworld-survival: null
   mkworld-battle: null
 

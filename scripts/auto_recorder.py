@@ -129,6 +129,9 @@ def update_results(
     result_info: ResultInfo, game_info: GameInfo, obs: Optional[OBSController]
 ):
     rates_in_result = [p.rate for p in result_info.players]
+    print("--------------------------------")
+    for rate in rates_in_result:
+        print(rate)
     n_valid = count_valid_rates(rates_in_result)
     prev_n_valid = count_valid_rates(game_info.rates_in_result)
 
@@ -185,6 +188,8 @@ def save_game_info(out_csv_path, game_info):
     header += [f"rates_after_{i}" for i in range(12)]
 
     if not out_csv_path.exists():
+        # フォルダがなければ作成
+        out_csv_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_csv_path, "w", encoding="utf8") as f:
             f.write(",".join(header) + "\n")
 
@@ -254,7 +259,13 @@ def create_screen_parser(game: str, debug: bool = False, **kwargs):
         )
         return parser
     elif game_title == "mkworld":
-        raise NotImplementedError("MK World is not supported yet")
+        from screen_parser.MKWorldScreenParser import MKWorldScreenParser
+
+        parser = MKWorldScreenParser(
+            **kwargs,
+            debug=debug,
+        )
+        return parser
     else:
         raise ValueError(f"Invalid game: {game}")
 

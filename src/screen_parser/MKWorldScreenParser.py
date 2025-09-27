@@ -49,17 +49,6 @@ class MKWorldScreenParser(ScreenParser):
 
         # テンプレート画像を読み込む
         template_images_dir = Path(template_images_dir)
-        for d in (template_images_dir / "courses").glob("*"):
-            for img_path in d.glob("*.png"):
-                tmpl = imread_safe(str(img_path))
-                tmpl = cv2.resize(tmpl, (173, 97))
-                self.course_dict.setdefault(d.stem, []).append(tmpl)
-
-        for d in (template_images_dir / "rules").glob("*"):
-            for img_path in d.glob("*.png"):
-                tmpl = imread_safe(str(img_path))
-                tmpl = cv2.resize(tmpl, (103, 93))
-                self.race_type_dict.setdefault(d.stem, []).append(tmpl)
 
         # 数字テンプレート画像を読み込む（複数バリエーション対応）
         digits_dir = template_images_dir / "myrate_digits"
@@ -149,19 +138,27 @@ class MKWorldScreenParser(ScreenParser):
         マリオカートワールド専用実装（黄色ハイライト部分のレートを検出）
         """
         # 黄色ハイライトから自分のレートを検出
-        my_rate, my_place = self._detect_my_rate_from_yellow_highlight(img)
+        detections = self._detect_result_rates(img)
+        my_rate = None
+        my_place = None
+        for det in detections:
+            if det["is_my_rate"]:
+                my_rate, my_place = det["rate"], det["place"]
+                break
 
         if my_rate is None or not (self.min_my_rate <= my_rate <= self.max_my_rate):
             return False, None
 
         # 他のプレイヤーのレートは0で初期化（要求に従って）
         # 実際に検出したい場合は後で実装可能
-        rates = [0] * 12  # 最大12人のプレイヤー
-        if my_place and 1 <= my_place <= 12:
-            rates[my_place - 1] = my_rate
+        rates = [0] * 13  # 最大13人のプレイヤー
+        for det in detections:
+            rates[det["place"] - 1] = det["rate"]
 
         result_info = ResultInfo(
-            players=[Player(name="", rate=rate) for rate in rates],
+            players=[
+                Player(name=f"player{i}", rate=rate) for i, rate in enumerate(rates)
+            ],
             my_rate=my_rate,
             my_place=my_place or 1,  # プレース検出に失敗した場合は1位とする
         )
@@ -206,8 +203,8 @@ class MKWorldScreenParser(ScreenParser):
         img: np.ndarray,
         threshold=0.4,
         use_match_templates=False,
-        scale_x=1.0,
-        scale_y=1.0,
+        x_overlap_threshold=9,
+        y_overlap_threshold=14,
     ):
         """
         画像内の数字をテンプレートマッチングで検出する
@@ -255,8 +252,8 @@ class MKWorldScreenParser(ScreenParser):
         for detection in detections:
             is_duplicate = False
             for i, existing in enumerate(filtered_detections):
-                x_overlap = abs(detection["x"] - existing["x"]) < 9 * scale_x
-                y_overlap = abs(detection["y"] - existing["y"]) < 14 * scale_y
+                x_overlap = abs(detection["x"] - existing["x"]) < x_overlap_threshold
+                y_overlap = abs(detection["y"] - existing["y"]) < y_overlap_threshold
                 if x_overlap and y_overlap:  # 位置が近い場合は重複とみなす
                     # より高い信頼度のものを採用
                     if detection["confidence"] > existing["confidence"]:
@@ -280,50 +277,6 @@ class MKWorldScreenParser(ScreenParser):
             return int(digit_string), avg_confidence
 
         return None, 0.0
-
-    def _detect_my_rate_from_fixed_positions(self, img: np.ndarray):
-        """
-        固定座標を使って各プレイヤー行から自分のレートを検出する
-        Returns: (my_rate, my_place)
-        """
-        h, w = img.shape[:2]
-
-        # 1920x1080の場合のプレイヤーボックス座標
-        # x1=1008, y1=40+70i, x2=1865, y2=110+70i
-        # 画像のサイズに応じてスケール調整
-        scale_x = w / 1920.0
-        scale_y = h / 1080.0
-
-        x1 = int(1008 * scale_x)
-        x2 = int(1865 * scale_x)
-
-        # 各プレイヤー行をチェック（13行）
-        for i in range(13):
-            y1 = int((40 + 70 * i) * scale_y)
-            y2 = int((110 + 70 * i) * scale_y)
-
-            # プレイヤー行の領域を抽出
-            if y2 >= h or x2 >= w:
-                continue
-
-            player_row = img[y1:y2, x1:x2]
-
-            # レート部分は右端付近にあると仮定して右端30%の領域を使用
-            rate_width = int(player_row.shape[1] * 0.3)
-            rate_region = player_row[:, -rate_width:]
-
-            # この領域で数字認識を実行
-            detected_rate, confidence = self._detect_digits_in_image(
-                rate_region, threshold=0.6, scale_x=scale_x, scale_y=scale_y
-            )
-
-            if (
-                detected_rate is not None
-                and self.min_my_rate <= detected_rate <= self.max_my_rate
-            ):
-                return detected_rate, i + 1
-
-        return None, None
 
     def _is_yellow_background(self, region: np.ndarray) -> bool:
         """
@@ -350,7 +303,7 @@ class MKWorldScreenParser(ScreenParser):
 
         return binary
 
-    def _detect_my_rate_from_yellow_highlight(self, img: np.ndarray):
+    def _detect_result_rates(self, img: np.ndarray):
         """
         固定座標で全プレイヤー行をチェックし、黄色背景の行からレートを検出
         Returns: (my_rate, my_place)
@@ -364,6 +317,7 @@ class MKWorldScreenParser(ScreenParser):
         rate_x2 = int(1865 * scale_x)
 
         # 全13行をチェック
+        detections = []
         for i in range(13):
             y1 = int((40 + 70 * i) * scale_y)
             y2 = int((110 + 70 * i) * scale_y)
@@ -375,8 +329,7 @@ class MKWorldScreenParser(ScreenParser):
             player_row = img[y1:y2, w // 2 :]  # 右半分のみ
 
             # 黄色背景かチェック
-            if not self._is_yellow_background(player_row):
-                continue
+            is_my_rate = self._is_yellow_background(player_row)
 
             # レート領域を抽出
             rate_region = img[y1:y2, rate_x1:rate_x2]
@@ -386,11 +339,14 @@ class MKWorldScreenParser(ScreenParser):
 
             # カラー画像でテンプレートマッチング（閾値0.65で誤検出を抑制）
             detected_rate, confidence = self._detect_digits_in_image(
-                rate_region, threshold=0.65, scale_x=scale_x, scale_y=scale_y
+                rate_region,
+                threshold=0.5,
+                x_overlap_threshold=25 / 2 * scale_x,
+                y_overlap_threshold=35 / 2 * scale_y,
             )
 
             # 自分のレート範囲内なら返す
-            if detected_rate and self.min_my_rate <= detected_rate <= self.max_my_rate:
+            if detected_rate:
                 if self.debug:
                     debug_img = img.copy()
                     cv2.rectangle(
@@ -407,9 +363,14 @@ class MKWorldScreenParser(ScreenParser):
                     )
                     imwrite_safe("debug_detection.png", debug_img)
 
-                return detected_rate, i + 1
-
-        return None, None
+                detections.append(
+                    {
+                        "rate": detected_rate,
+                        "place": i + 1,
+                        "is_my_rate": is_my_rate,
+                    }
+                )
+        return detections
 
     def _rates_in_match_info(self, img: np.ndarray):
         """
@@ -453,8 +414,8 @@ class MKWorldScreenParser(ScreenParser):
                     rate_region,
                     threshold=0.8,
                     use_match_templates=True,
-                    scale_x=scale_x,
-                    scale_y=scale_y,
+                    x_overlap_threshold=9 * scale_x,
+                    y_overlap_threshold=14 * scale_y,
                 )
 
                 # # 検出結果をデバッグ出力
