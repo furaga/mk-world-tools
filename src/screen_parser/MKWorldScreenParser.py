@@ -93,6 +93,16 @@ class MKWorldScreenParser(ScreenParser):
                 if digit_templates:
                     self.match_digit_templates[str(i)] = digit_templates
 
+        # 順位テンプレート画像を読み込む
+        self.place_templates = {}
+        places_dir = template_images_dir / "places"
+        if places_dir.exists():
+            for place_path in places_dir.glob("*.png"):
+                place_num = int(place_path.stem)
+                template = imread_safe(str(place_path))
+                if template is not None:
+                    self.place_templates[place_num] = template
+
         # テンプレート画像の総数を計算
         total_digit_templates = sum(
             len(templates) for templates in self.digit_templates.values()
@@ -102,7 +112,7 @@ class MKWorldScreenParser(ScreenParser):
         )
 
         logger.info(
-            f"Loaded {len(self.course_dict)} courses, {len(self.race_type_dict)} race types, {total_digit_templates} result digit templates ({len(self.digit_templates)} digits), and {total_match_digit_templates} match digit templates ({len(self.match_digit_templates)} digits)"
+            f"Loaded {len(self.course_dict)} courses, {len(self.race_type_dict)} race types, {total_digit_templates} result digit templates ({len(self.digit_templates)} digits), {total_match_digit_templates} match digit templates ({len(self.match_digit_templates)} digits), and {len(self.place_templates)} place templates"
         )
 
     def detect_match_info(self, img: np.ndarray) -> Tuple[bool, MatchInfo]:
@@ -151,9 +161,12 @@ class MKWorldScreenParser(ScreenParser):
 
         # 他のプレイヤーのレートは0で初期化（要求に従って）
         # 実際に検出したい場合は後で実装可能
-        rates = [0] * 13  # 最大13人のプレイヤー
+        # 最大24人のプレイヤーをサポート
+        max_place = max((det["place"] for det in detections), default=13)
+        rates = [0] * max(max_place, 13)
         for det in detections:
-            rates[det["place"] - 1] = det["rate"]
+            if 1 <= det["place"] <= len(rates):
+                rates[det["place"] - 1] = det["rate"]
 
         result_info = ResultInfo(
             players=[
@@ -303,10 +316,38 @@ class MKWorldScreenParser(ScreenParser):
 
         return binary
 
+    def _detect_place(self, region: np.ndarray, threshold=0.7) -> int:
+        """
+        順位領域から順位をテンプレートマッチングで検出
+        Returns: 検出された順位（1-24）、検出失敗時はNone
+        """
+        best_score = 0
+        best_place = None
+
+        print("------")
+        for place_num, template in self.place_templates.items():
+            if (
+                template.shape[0] > region.shape[0]
+                or template.shape[1] > region.shape[1]
+            ):
+                continue
+
+            result = cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(result)
+
+            print(f"place_num: {place_num}, max_val: {max_val}")
+            if max_val > best_score:
+                best_score = max_val
+                best_place = place_num
+
+        if best_score >= threshold:
+            return best_place
+        return None
+
     def _detect_result_rates(self, img: np.ndarray):
         """
         固定座標で全プレイヤー行をチェックし、黄色背景の行からレートを検出
-        Returns: (my_rate, my_place)
+        Returns: list of detections with rate, place, and is_my_rate
         """
         h, w = img.shape[:2]
         scale_x = w / 1920.0
@@ -316,13 +357,17 @@ class MKWorldScreenParser(ScreenParser):
         rate_x1 = int(1730 * scale_x)
         rate_x2 = int(1865 * scale_x)
 
+        # 順位表示領域の固定座標（1920x1080基準）
+        place_x1 = int(1060 * scale_x)
+        place_x2 = int(1145 * scale_x)
+
         # 全13行をチェック
         detections = []
         for i in range(13):
             y1 = int((40 + 70 * i) * scale_y)
             y2 = int((110 + 70 * i) * scale_y)
 
-            if y2 >= h or rate_x2 >= w:
+            if y2 >= h or rate_x2 >= w or place_x2 >= w:
                 continue
 
             # プレイヤー行全体を取得（黄色判定用）
@@ -334,10 +379,14 @@ class MKWorldScreenParser(ScreenParser):
             # レート領域を抽出
             rate_region = img[y1:y2, rate_x1:rate_x2]
 
-            if self.debug:
-                imwrite_safe("debug_rate_region.png", rate_region)
+            # 順位領域を抽出
+            place_region = img[y1:y2, place_x1:place_x2]
 
-            # カラー画像でテンプレートマッチング（閾値0.65で誤検出を抑制）
+            #   if self.debug:
+            imwrite_safe("debug_rate_region.png", rate_region)
+            imwrite_safe("debug_place_region.png", place_region)
+
+            # レートをテンプレートマッチングで検出
             detected_rate, confidence = self._detect_digits_in_image(
                 rate_region,
                 threshold=0.5,
@@ -345,16 +394,27 @@ class MKWorldScreenParser(ScreenParser):
                 y_overlap_threshold=35 / 2 * scale_y,
             )
 
-            # 自分のレート範囲内なら返す
+            # 順位をテンプレートマッチングで検出
+            detected_place = None
+            if is_my_rate:
+                detected_place = self._detect_place(place_region, threshold=0.3)
+
+            # レートが検出された場合のみ追加（順位が検出できない場合はデフォルト値を使用）
             if detected_rate:
+                # 順位が検出できなかった場合は行番号を使用（フォールバック）
+                place = detected_place if detected_place else -1
+
                 if self.debug:
                     debug_img = img.copy()
                     cv2.rectangle(
                         debug_img, (rate_x1, y1), (rate_x2, y2), (0, 255, 0), 2
                     )
+                    cv2.rectangle(
+                        debug_img, (place_x1, y1), (place_x2, y2), (255, 0, 0), 2
+                    )
                     cv2.putText(
                         debug_img,
-                        f"Rate: {detected_rate}, Place: {i + 1}",
+                        f"Rate: {detected_rate}, Place: {place}",
                         (rate_x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
@@ -366,7 +426,7 @@ class MKWorldScreenParser(ScreenParser):
                 detections.append(
                     {
                         "rate": detected_rate,
-                        "place": i + 1,
+                        "place": place,
                         "is_my_rate": is_my_rate,
                     }
                 )

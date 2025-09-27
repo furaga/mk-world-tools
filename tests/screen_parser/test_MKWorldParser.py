@@ -27,8 +27,9 @@ class TestMKWorldScreenParser(unittest.TestCase):
         """
         test_data_dir = Path("tests/screen_parser/data/result")
 
-        # mkw_result_*.png ファイルを全て取得
+        # mkw_result_*.png/.jpg ファイルを全て取得
         image_files = list(test_data_dir.glob("mkw_result_*.png"))
+        image_files.extend(list(test_data_dir.glob("mkw_result_*.jpg")))
 
         if not image_files:
             self.skipTest(f"テスト画像が見つかりません: {test_data_dir}")
@@ -37,7 +38,8 @@ class TestMKWorldScreenParser(unittest.TestCase):
             with self.subTest(image=image_path.name):
                 # ファイル名から期待レートを抽出
                 # mkw_result_9112.png -> 9112
-                expected_rate = int(image_path.stem.split("_")[-1])
+                expected_rate = int(image_path.stem.split("_")[-2])
+                expected_place = int(image_path.stem.split("_")[-1])
 
                 # 画像を読み込み
                 img = imread_safe(str(image_path))
@@ -69,13 +71,10 @@ class TestMKWorldScreenParser(unittest.TestCase):
                 )
 
                 # 順位が妥当な範囲内であることを確認
-                self.assertGreaterEqual(
-                    result_info.my_place, 1, f"順位が1未満です: {image_path.name}"
-                )
-                self.assertLessEqual(
+                self.assertEqual(
                     result_info.my_place,
-                    24,
-                    f"順位が12を超えています: {image_path.name}",
+                    expected_place,
+                    f"順位が期待値と異なります: {image_path.name}",
                 )
 
                 # 自分のレートが正しい位置に設定されているか確認
